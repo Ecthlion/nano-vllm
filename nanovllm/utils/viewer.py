@@ -65,52 +65,18 @@ class KVCacheViewer:
 
             token_offset += block_tokens
 
-    def visualize_3d_kv_cache(self, layer_idx=0, head_idx=0, cache_type="value"):
-        if cache_type == "key":
-            data = (
-                self.local_kv_cache[0, layer_idx, :, head_idx].float().cpu().numpy()
-            )  # [tokens, head_dim]
-        else:  # value
-            data = (
-                self.local_kv_cache[1, layer_idx, :, head_idx].float().cpu().numpy()
-            )  # [tokens, head_dim]
-
-        tokens, head_dim = data.shape
-
-        x = np.arange(tokens)
-        y = np.arange(head_dim)
-        X, Y = np.meshgrid(y, x)
-
-        fig = plt.figure(figsize=(12, 8))
-        ax = fig.add_subplot(111, projection="3d")
-
-        surf = ax.plot_surface(X, Y, data, cmap="viridis", alpha=0.8, edgecolor="none")
-
-        ax.set_xlabel("Hidden Dimension", fontsize=12, labelpad=10)
-        ax.set_ylabel("Token Position", fontsize=12, labelpad=10)
-        ax.set_zlabel("Activation Value", fontsize=12, labelpad=10)
-
-        title = f"3D {cache_type.capitalize()} Cache - Layer {layer_idx}, Head {head_idx}\nSeq Length: {tokens}"
-        ax.set_title(title, fontsize=14, pad=20)
-
-        fig.colorbar(surf, ax=ax, shrink=0.5, aspect=20, label="Activation Value")
-
-        ax.view_init(elev=30, azim=45)
-
-        plt.tight_layout()
-        plt.savefig(f"./graph/3d_{cache_type}_layer{layer_idx}_head{head_idx}.png")
-        plt.close()
-
-        return fig, ax
-
     def visualize_heatmap_kv_cache(self, layer_idx=0, head_idx=0, cache_type="value"):
         if cache_type == "key":
             data = (
                 self.local_kv_cache[0, layer_idx, :, head_idx].float().cpu().numpy()
             )  # [tokens, head_dim]
-        else:  # value
+        elif cache_type == "value":  # value
             data = (
                 self.local_kv_cache[1, layer_idx, :, head_idx].float().cpu().numpy()
+            )  # [tokens, head_dim]
+        else:  # query
+            data = (
+                self.local_q_cache[layer_idx, :, head_idx].float().cpu().numpy()
             )  # [tokens, head_dim]
 
         fig, ax = plt.subplots(figsize=(12, 8))
@@ -166,7 +132,7 @@ class KVCacheViewer:
         attention_scores = torch.matmul(
             q_selected, k_selected.transpose(0, 1)
         ) / np.sqrt(head_dim)
-        attention_scores = attention_scores.masked_fill(~mask, float('-inf'))
+        attention_scores = attention_scores.masked_fill(~mask, float("-inf"))
         attention_weights = torch.softmax(attention_scores, dim=-1)
         data = attention_weights.detach().float().cpu().numpy()
 
@@ -224,6 +190,47 @@ class KVCacheViewer:
             self.visualize_heatmap_kv_cache(layer_idx, 4, "key")
             self.visualize_heatmap_kv_cache(layer_idx, 0, "value")
             self.visualize_heatmap_kv_cache(layer_idx, 4, "value")
+            self.visualize_heatmap_kv_cache(layer_idx, 0, "query")
+            self.visualize_heatmap_kv_cache(layer_idx, 4, "query")
 
         # print("Generating multi-head overview...")
         # self.visualize_all_heads(layer_idx, "key")
+
+    # def visualize_3d_kv_cache(self, layer_idx=0, head_idx=0, cache_type="value"):
+    #     if cache_type == "key":
+    #         data = (
+    #             self.local_kv_cache[0, layer_idx, :, head_idx].float().cpu().numpy()
+    #         )  # [tokens, head_dim]
+    #     else:  # value
+    #         data = (
+    #             self.local_kv_cache[1, layer_idx, :, head_idx].float().cpu().numpy()
+    #         )  # [tokens, head_dim]
+    #
+    #     tokens, head_dim = data.shape
+    #
+    #     x = np.arange(tokens)
+    #     y = np.arange(head_dim)
+    #     X, Y = np.meshgrid(y, x)
+    #
+    #     fig = plt.figure(figsize=(12, 8))
+    #     ax = fig.add_subplot(111, projection="3d")
+    #
+    #     surf = ax.plot_surface(X, Y, data, cmap="viridis", alpha=0.8, edgecolor="none")
+    #
+    #     ax.set_xlabel("Hidden Dimension", fontsize=12, labelpad=10)
+    #     ax.set_ylabel("Token Position", fontsize=12, labelpad=10)
+    #     ax.set_zlabel("Activation Value", fontsize=12, labelpad=10)
+    #
+    #     title = f"3D {cache_type.capitalize()} Cache - Layer {layer_idx}, Head {head_idx}\nSeq Length: {tokens}"
+    #     ax.set_title(title, fontsize=14, pad=20)
+    #
+    #     fig.colorbar(surf, ax=ax, shrink=0.5, aspect=20, label="Activation Value")
+    #
+    #     ax.view_init(elev=30, azim=45)
+    #
+    #     plt.tight_layout()
+    #     plt.savefig(f"./graph/3d_{cache_type}_layer{layer_idx}_head{head_idx}.png")
+    #     plt.close()
+    #
+    #     return fig, ax
+    #
