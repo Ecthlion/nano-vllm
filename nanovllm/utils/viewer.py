@@ -2,32 +2,46 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import torch
+from transformers import AttentionInterface
 
 from nanovllm.engine.sequence import Sequence
 
 
 class KVCacheViewer:
-    def __init__(self, kv_cache, config) -> None:
+    def __init__(self, kv_cache, q_cache, config) -> None:
         assert config.tensor_parallel_size == 1
         self.kv_cache = kv_cache
+        self.q_cache = q_cache
         self.config = config
         self.seqs = []
 
     def add_seq(self, seq: Sequence):
         self.seqs.append(seq)
 
-    def get_seq_kv_cache(self, seq: Sequence):
+    def get_seq_qkv_cache(self, seq: Sequence):
         hf_config = self.config.hf_config
         num_kv_heads = hf_config.num_key_value_heads
+        num_q_heads = hf_config.num_attention_heads
         num_layers = hf_config.num_hidden_layers
 
+        # Tensor [2, layer_num, seq_len, kv_heads, head_dim]
         self.local_kv_cache = torch.zeros(
             2,
             hf_config.num_hidden_layers,
             seq.num_tokens,
             num_kv_heads,
             hf_config.head_dim,
+            device=self.kv_cache.device,
+            dtype=self.kv_cache.dtype,
         )
+
+        # print(self.local_kv_cache.is_cpu)
+        # print(self.local_kv_cache.dtype)
+
+        # Tensor [layer_num, seq_len, q_heads, head_dim]
+        self.local_q_cache = self.q_cache[:, : len(seq), :, :]
+        # verify
+        print(f"transfered q: {self.local_q_cache[0, 5, 0, 2]}")
 
         token_offset = 0
         transpose_kv_cache = self.kv_cache.transpose(1, 2)
@@ -54,11 +68,11 @@ class KVCacheViewer:
     def visualize_3d_kv_cache(self, layer_idx=0, head_idx=0, cache_type="value"):
         if cache_type == "key":
             data = (
-                self.local_kv_cache[0, layer_idx, :, head_idx].cpu().numpy()
+                self.local_kv_cache[0, layer_idx, :, head_idx].float().cpu().numpy()
             )  # [tokens, head_dim]
         else:  # value
             data = (
-                self.local_kv_cache[1, layer_idx, :, head_idx].cpu().numpy()
+                self.local_kv_cache[1, layer_idx, :, head_idx].float().cpu().numpy()
             )  # [tokens, head_dim]
 
         tokens, head_dim = data.shape
@@ -92,11 +106,11 @@ class KVCacheViewer:
     def visualize_heatmap_kv_cache(self, layer_idx=0, head_idx=0, cache_type="value"):
         if cache_type == "key":
             data = (
-                self.local_kv_cache[0, layer_idx, :, head_idx].cpu().numpy()
+                self.local_kv_cache[0, layer_idx, :, head_idx].float().cpu().numpy()
             )  # [tokens, head_dim]
         else:  # value
             data = (
-                self.local_kv_cache[1, layer_idx, :, head_idx].cpu().numpy()
+                self.local_kv_cache[1, layer_idx, :, head_idx].float().cpu().numpy()
             )  # [tokens, head_dim]
 
         fig, ax = plt.subplots(figsize=(12, 8))
@@ -129,25 +143,83 @@ class KVCacheViewer:
 
         return fig, ax
 
+    def visualize_attn(self, layer_idx=0, head_idx=0):
+        # K: [seq_len, kv_heads, head_dim]
+        k_cache = self.local_kv_cache[0, layer_idx, :, :, :]
+        # Q: [seq_len, q_heads, head_dim]
+        q_cache = self.local_q_cache[layer_idx, :, :, :]
+
+        seq_len = q_cache.shape[0]
+        head_dim = q_cache.shape[2]
+
+        # 16 4
+        group_num = q_cache.shape[1] // k_cache.shape[1]
+        kv_head_idx = (head_idx + group_num - 1) // group_num
+
+        k_selected = k_cache[:, kv_head_idx, :]  # [seq_len, head_dim]
+        q_selected = q_cache[:, head_idx, :]  # [seq_len, head_dim]
+
+        # [seq_len, head_dim] @ [head_dim, seq_len] = [seq_len, seq_len]
+        mask = torch.tril(
+            torch.ones(seq_len, seq_len, device=q_cache.device, dtype=q_cache.dtype)
+        ).bool()
+        attention_scores = torch.matmul(
+            q_selected, k_selected.transpose(0, 1)
+        ) / np.sqrt(head_dim)
+        attention_scores = attention_scores.masked_fill(~mask, float('-inf'))
+        attention_weights = torch.softmax(attention_scores, dim=-1)
+        data = attention_weights.detach().float().cpu().numpy()
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        # 使用seaborn绘制热力图
+        heatmap = sns.heatmap(
+            data,
+            cmap="viridis",
+            ax=ax,
+            cbar_kws={"label": "Activation Value"},
+        )
+
+        # 设置标签
+        ax.set_xlabel("K Seq Len", fontsize=12)
+        ax.set_ylabel("Q Seq Len", fontsize=12)
+
+        title = f"Heatmap of Attn - Layer {layer_idx}, Head {head_idx}\nSeq Length: {data.shape[0]}"
+        ax.set_title(title, fontsize=14, pad=20)
+
+        # 如果token数量很多，可以适当减少刻度显示
+        if data.shape[0] > 50:
+            ax.set_yticks(np.linspace(0, data.shape[0], 10, dtype=int))
+        if data.shape[1] > 50:
+            ax.set_xticks(np.linspace(0, data.shape[1], 10, dtype=int))
+
+        plt.tight_layout()
+        plt.savefig(f"./graph/heatmap_attn_layer{layer_idx}_head{head_idx}.png")
+        plt.close()
+
+        return fig, ax
+
     def view(self, seq_idx=0):
         if not self.seqs:
             print("No sequences added for visualization.")
             return
 
         seq = self.seqs[seq_idx]
-        self.get_seq_kv_cache(seq)
+        self.get_seq_qkv_cache(seq)
 
         print(f"Visualizing KV cache for sequence with {seq.num_tokens} tokens")
 
-        print("Generating 3D visualization...")
-        for layer_idx in range(0, self.config.hf_config.num_hidden_layers, 5):
-            self.visualize_3d_kv_cache(layer_idx, 0, "key")
-            self.visualize_3d_kv_cache(layer_idx, 4, "key")
-            self.visualize_3d_kv_cache(layer_idx, 0, "value")
-            self.visualize_3d_kv_cache(layer_idx, 4, "value")
+        # print("Generating 3D visualization...")
+        # for layer_idx in range(0, self.config.hf_config.num_hidden_layers, 5):
+        #     self.visualize_3d_kv_cache(layer_idx, 0, "key")
+        #     self.visualize_3d_kv_cache(layer_idx, 4, "key")
+        #     self.visualize_3d_kv_cache(layer_idx, 0, "value")
+        #     self.visualize_3d_kv_cache(layer_idx, 4, "value")
 
         print("Generating heatmap visualization...")
         for layer_idx in range(0, self.config.hf_config.num_hidden_layers, 5):
+            self.visualize_attn(layer_idx, 0)
+            self.visualize_attn(layer_idx, 4)
             self.visualize_heatmap_kv_cache(layer_idx, 0, "key")
             self.visualize_heatmap_kv_cache(layer_idx, 4, "key")
             self.visualize_heatmap_kv_cache(layer_idx, 0, "value")

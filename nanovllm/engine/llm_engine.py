@@ -29,7 +29,7 @@ class LLMEngine:
             self.ps.append(process)
             self.events.append(event)
         self.model_runner = ModelRunner(config, 0, self.events)
-        self.kvcache_viewer = KVCacheViewer(self.model_runner.kv_cache, config)
+        self.kvcache_viewer = KVCacheViewer(self.model_runner.kv_cache, self.model_runner.q_cache, config)
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
         self.scheduler = Scheduler(config)

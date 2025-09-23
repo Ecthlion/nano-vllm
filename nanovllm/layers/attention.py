@@ -1,9 +1,9 @@
 import torch
-from torch import nn
 import triton
 import triton.language as tl
-
 from flash_attn import flash_attn_varlen_func, flash_attn_with_kvcache
+from torch import nn
+
 from nanovllm.utils.context import get_context
 
 
@@ -29,14 +29,51 @@ def store_kvcache_kernel(
     tl.store(v_cache_ptr + cache_offsets, value)
 
 
-def store_kvcache(key: torch.Tensor, value: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor, slot_mapping: torch.Tensor):
+def store_kvcache(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    slot_mapping: torch.Tensor,
+):
     N, num_heads, head_dim = key.shape
     D = num_heads * head_dim
     assert key.stride(-1) == 1 and value.stride(-1) == 1
     assert key.stride(1) == head_dim and value.stride(1) == head_dim
     assert k_cache.stride(1) == D and v_cache.stride(1) == D
     assert slot_mapping.numel() == N
-    store_kvcache_kernel[(N,)](key, key.stride(0), value, value.stride(0), k_cache, v_cache, slot_mapping, D)
+    store_kvcache_kernel[(N,)](
+        key, key.stride(0), value, value.stride(0), k_cache, v_cache, slot_mapping, D
+    )
+
+
+@triton.jit
+def store_qcache_kernel(
+    query_ptr,
+    query_stride,
+    q_cache_ptr,
+    q_slot_mapping_ptr,
+    D: tl.constexpr,
+):
+    idx = tl.program_id(0)
+    query_offsets = idx * query_stride + tl.arange(0, D)
+    query = tl.load(query_ptr + query_offsets)
+    slot = tl.load(q_slot_mapping_ptr + idx)
+    cache_offsets = slot * D + tl.arange(0, D)
+    tl.store(q_cache_ptr + cache_offsets, query)
+
+
+def store_qcache(
+    query: torch.Tensor,
+    q_cache: torch.Tensor,
+    q_slot_mapping: torch.Tensor,
+):
+    N, num_heads, head_dim = query.shape
+    D = num_heads * head_dim
+    store_qcache_kernel[(N,)](query, query.stride(0), q_cache, q_slot_mapping, D)
+
+
+LAYER_IDX = 0
 
 
 class Attention(nn.Module):
@@ -54,6 +91,7 @@ class Attention(nn.Module):
         self.scale = scale
         self.num_kv_heads = num_kv_heads
         self.k_cache = self.v_cache = torch.tensor([])
+        self.q_cache = torch.tensor([])
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
         o: torch.Tensor
@@ -64,16 +102,39 @@ class Attention(nn.Module):
         k_cache, v_cache = self.k_cache, self.v_cache
         if k_cache.numel() and v_cache.numel():
             store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)
+        if self.q_cache.numel():
+            store_qcache(q, self.q_cache, context.q_slot_mapping)
+
+        # verify
+        global LAYER_IDX
+        if LAYER_IDX == 0:
+            print(f"calculated q: {q[5][0][2]}")
+            LAYER_IDX += 1
+
         if context.is_prefill:
-            if context.block_tables is not None:    # prefix cache
+            if context.block_tables is not None:  # prefix cache
                 k, v = k_cache, v_cache
-            o = flash_attn_varlen_func(q, k, v,
-                                       max_seqlen_q=context.max_seqlen_q, cu_seqlens_q=context.cu_seqlens_q,
-                                       max_seqlen_k=context.max_seqlen_k, cu_seqlens_k=context.cu_seqlens_k,
-                                       softmax_scale=self.scale, causal=True, block_table=context.block_tables)
-        else:    # decode
-            o = flash_attn_with_kvcache(q.unsqueeze(1), k_cache, v_cache,
-                                        cache_seqlens=context.context_lens, block_table=context.block_tables, 
-                                        softmax_scale=self.scale, causal=True)
+            o = flash_attn_varlen_func(
+                q,
+                k,
+                v,
+                max_seqlen_q=context.max_seqlen_q,
+                cu_seqlens_q=context.cu_seqlens_q,
+                max_seqlen_k=context.max_seqlen_k,
+                cu_seqlens_k=context.cu_seqlens_k,
+                softmax_scale=self.scale,
+                causal=True,
+                block_table=context.block_tables,
+            )
+        else:  # decode
+            o = flash_attn_with_kvcache(
+                q.unsqueeze(1),
+                k_cache,
+                v_cache,
+                cache_seqlens=context.context_lens,
+                block_table=context.block_tables,
+                softmax_scale=self.scale,
+                causal=True,
+            )
         o = o.view(-1, self.num_heads * self.head_dim)
         return o
