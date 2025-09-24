@@ -10,6 +10,9 @@ from nanovllm.layers.linear import QKVParallelLinear, MergedColumnParallelLinear
 from nanovllm.layers.rotary_embedding import get_rope
 from nanovllm.layers.embed_head import VocabParallelEmbedding, ParallelLMHead
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
 
 class Qwen3Attention(nn.Module):
 
@@ -164,6 +167,35 @@ class Qwen3Model(nn.Module):
         self.layers = nn.ModuleList([Qwen3DecoderLayer(config) for _ in range(config.num_hidden_layers)])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
+    def view(self, data):
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        # 使用seaborn绘制热力图
+        heatmap = sns.heatmap(
+            data,
+            cmap="RdBu_r",  # 红蓝渐变色，适合显示正负值
+            center=0,  # 以0为中心
+            ax=ax,
+            cbar_kws={"label": "Activation Value"},
+        )
+
+        # 设置标签
+        ax.set_xlabel("Hidden Dimension", fontsize=12)
+        ax.set_ylabel("Layer Idx", fontsize=12)
+
+        title = f"Heatmap of Hidden State"
+        ax.set_title(title, fontsize=14, pad=20)
+
+        # 如果token数量很多，可以适当减少刻度显示
+        if data.shape[0] > 50:
+            ax.set_yticks(np.linspace(0, data.shape[0], 10, dtype=int))
+        if data.shape[1] > 50:
+            ax.set_xticks(np.linspace(0, data.shape[1], 10, dtype=int))
+
+        plt.tight_layout()
+        plt.savefig(f"./graph/hidden_states.png")
+        plt.close()
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -171,8 +203,23 @@ class Qwen3Model(nn.Module):
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
         residual = None
+        
+        last_rows = []
+        count = 0
         for layer in self.layers:
+            if count >= 6 and count <= 30 and count % 2 == 1:
+                continue
+
             hidden_states, residual = layer(positions, hidden_states, residual)
+            last_rows.append(hidden_states[-1, :])
+
+            count += 1
+
+            # if count == 30:
+            #     break
+        last_rows = torch.stack(last_rows)
+        self.view(last_rows.float().cpu().numpy())
+
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 
