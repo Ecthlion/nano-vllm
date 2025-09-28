@@ -204,21 +204,21 @@ class Qwen3Model(nn.Module):
         hidden_states = self.embed_tokens(input_ids)
         residual = None
         
-        last_rows = []
-        count = 0
+        # last_rows = []
+        # count = 0
         for layer in self.layers:
-            if count >= 6 and count <= 30 and count % 2 == 1:
-                continue
+            # if count >= 6 and count <= 30 and count % 2 == 1:
+            #     continue
 
             hidden_states, residual = layer(positions, hidden_states, residual)
-            last_rows.append(hidden_states[-1, :])
-
-            count += 1
+            # last_rows.append(hidden_states[-1, :])
+            #
+            # count += 1
 
             # if count == 30:
             #     break
-        last_rows = torch.stack(last_rows)
-        self.view(last_rows.float().cpu().numpy())
+        # last_rows = torch.stack(last_rows)
+        # self.view(last_rows.float().cpu().numpy())
 
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
