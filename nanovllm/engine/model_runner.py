@@ -1,4 +1,5 @@
 import pickle
+from termcolor import colored
 import torch
 import torch.distributed as dist
 from multiprocessing.synchronize import Event
@@ -104,11 +105,12 @@ class ModelRunner:
         used = total - free
         peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]
         current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
-        num_kv_heads = hf_config.num_key_value_heads // self.world_size
-        block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * hf_config.head_dim * hf_config.torch_dtype.itemsize
-        config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
-        assert config.num_kvcache_blocks > 0
-        self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, hf_config.head_dim)
+        num_kv_heads = hf_config.num_key_value_heads // self.world_size # type: ignore
+        block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * hf_config.head_dim * hf_config.torch_dtype.itemsize # type: ignore
+        config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes # type: ignore
+        assert config.num_kvcache_blocks > 0 # type: ignore
+        self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, hf_config.head_dim) # type: ignore
+        print(colored(f"num blocks: {config.num_kvcache_blocks}, total: {config.num_kvcache_blocks * self.block_size}", "magenta"))
         layer_id = 0
         for module in self.model.modules():
             if hasattr(module, "k_cache") and hasattr(module, "v_cache"):
@@ -143,7 +145,19 @@ class ModelRunner:
             max_seqlen_k = max(seqlen_k, max_seqlen_k)
             if not seq.block_table:    # warmup
                 continue
-            for i in range(seq.num_cached_blocks, seq.num_blocks):
+
+            last_cached_block_num_tokens = seq.num_cached_tokens - seq.num_cached_blocks * self.block_size
+            offset = seq.block_table[seq.num_cached_blocks] * self.block_size
+            start = offset + last_cached_block_num_tokens
+
+            if seq.num_cached_blocks != seq.num_blocks - 1:
+                end = offset + self.block_size
+            else:
+                end = offset + seq.last_block_num_tokens
+
+            slot_mapping.extend(list(range(start, end)))
+
+            for i in range(seq.num_cached_blocks + 1, seq.num_blocks):
                 start = seq.block_table[i] * self.block_size
                 if i != seq.num_blocks - 1:
                     end = start + self.block_size
