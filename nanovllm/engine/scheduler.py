@@ -19,6 +19,7 @@ class Scheduler:
         self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size)
         self.waiting: deque[Sequence] = deque()
         self.running: deque[Sequence] = deque()
+        self.first = True
 
     def is_finished(self):
         with self._lock:
@@ -49,18 +50,21 @@ class Scheduler:
                 return scheduled_seqs, True
 
             # decode
-            while self.running and num_seqs < self.max_num_seqs:
-                seq = self.running.popleft()
-                while not self.block_manager.can_append(seq):
-                    if self.running:
-                        self.preempt(self.running.pop())
-                    else:
-                        self.preempt(seq)
-                        break
-                else:
-                    num_seqs += 1
-                    self.block_manager.may_append(seq)
-                    scheduled_seqs.append(seq)
+            # TODO: decode bug
+
+            # while self.running and num_seqs < self.max_num_seqs:
+            #     seq = self.running.popleft()
+            #     while not self.block_manager.can_append(seq):
+            #         if self.running:
+            #             self.preempt(self.running.pop())
+            #         else:
+            #             self.preempt(seq)
+            #             break
+            #     else:
+            #         num_seqs += 1
+            #         self.block_manager.may_append(seq)
+            #         scheduled_seqs.append(seq)
+
             assert scheduled_seqs
             self.running.extendleft(reversed(scheduled_seqs))
             return scheduled_seqs, False

@@ -35,7 +35,7 @@ class LLMEngine:
             self.ps.append(process)
             self.events.append(event)
         self.model_runner = ModelRunner(config, 0, self.events)
-        self.kv_cache_index = KVCacheIndex(self.model_runner.kv_cache, index_name="imdb_kvcache.pt")
+        self.kv_cache_index = KVCacheIndex(self.model_runner.kv_cache, index_name="imdb_kvcache_10x.pt")
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
         self.scheduler = Scheduler(config)

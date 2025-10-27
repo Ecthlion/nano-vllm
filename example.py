@@ -35,8 +35,8 @@ class ImdbDataset:
         num_input_lines=1000,
     ) -> tuple[list[tuple[int, str]], int]:
         chose_lines = self.data["review"][:num_input_lines]
-        lines_per_prompt = 1
-        assert lines_per_prompt == 1
+        lines_per_prompt = 10
+        assert lines_per_prompt == 10
         duplicate = 1
         samples = []
         num_requests = int(num_input_lines / lines_per_prompt)
@@ -62,7 +62,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(path)
     llm = LLM(path, enforce_eager=False, tensor_parallel_size=1)
     max_output_len = 1
-    sampling_params = SamplingParams(temperature=0.6, max_tokens=max_output_len)
+    sampling_params = SamplingParams(temperature=1, max_tokens=max_output_len)
     dataset = ImdbDataset()
 
     ###################################################################
@@ -105,6 +105,7 @@ def main():
     # prof.export_chrome_trace("trace_task2.json")
 
     print(colored(f"Total generate time: {( end - start ):.4f} s", "blue"))
+    print(f"output: {len(outputs)}")
 
     generated = [output["text"] for output in outputs]
     # print(f"{generated[:10]}")
