@@ -35,8 +35,8 @@ class ImdbDataset:
         num_input_lines=1000,
     ) -> tuple[list[tuple[int, str]], int]:
         chose_lines = self.data["review"][:num_input_lines]
-        lines_per_prompt = 10
-        assert lines_per_prompt == 10
+        lines_per_prompt = 1
+        assert lines_per_prompt == 1
         duplicate = 1
         samples = []
         num_requests = int(num_input_lines / lines_per_prompt)
@@ -64,6 +64,18 @@ def main():
     max_output_len = 1
     sampling_params = SamplingParams(temperature=1, max_tokens=max_output_len)
     dataset = ImdbDataset()
+
+    ###################################################################
+    if not llm.kv_cache_index.indexed:
+        print(colored("\nBuild index", "yellow"))
+        base_prompt = ""
+        samples, base_token_len = dataset.sample(tokenizer, base_prompt, 1000)
+        sampling_params.base_token_len = base_token_len
+
+        start = time()
+        outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
+        end = time()
+        print(colored(f"Build index time: {(end - start):.4f} s", "blue"))
 
     ###################################################################
     # print(colored("Task1: suitable for kids", "yellow"))

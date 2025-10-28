@@ -14,11 +14,13 @@ class KVCacheIndex:
         self.gpu_kv_cache = gpu_kv_cache
         self.path = f"/data/zwt/{index_name}"
         self.dirty = False
+        self.indexed = False
 
         # text_id -> kv_cache[2, num_layers, seq_len, num_kv_heads, head_dim]
         self.kv_cache_index: dict = {}
         if os.path.isfile(self.path):
             self.kv_cache_index = torch.load(self.path)
+            self.indexed = True
 
     def store_kv_cache(self, seqs: list[Sequence]):
         for seq in seqs:

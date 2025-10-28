@@ -35,7 +35,7 @@ class LLMEngine:
             self.ps.append(process)
             self.events.append(event)
         self.model_runner = ModelRunner(config, 0, self.events)
-        self.kv_cache_index = KVCacheIndex(self.model_runner.kv_cache, index_name="imdb_kvcache_10x.pt")
+        self.kv_cache_index = KVCacheIndex(self.model_runner.kv_cache, index_name="imdb_kvcache.pt")
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
         self.scheduler = Scheduler(config)
@@ -53,6 +53,8 @@ class LLMEngine:
         atexit.register(self.exit)
 
     def exit(self):
+        if self.use_index:
+            self.kv_cache_index.persistence()
         # Stop prefetch thread if running
         if self._prefetch_thread is not None:
             self._stop_prefetch.set()
@@ -181,6 +183,7 @@ class LLMEngine:
         use_tqdm: bool = True,
         use_index: bool = False,
     ) -> list[dict]:
+        self.use_index = use_index
         if use_tqdm:
             pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True)
         if not isinstance(sampling_params, list):
@@ -212,14 +215,11 @@ class LLMEngine:
         outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
         if use_tqdm:
             pbar.close() # type: ignore
-        if use_index:
-            self.kv_cache_index.persistence()
-            # Final stats print
-            if self._stats["num_batches"] > 0:
-                total_xfer = self._stats["total_xfer_ms"]
-                total_comp = self._stats["total_compute_ms"]
-                nb = self._stats["num_batches"]
-                avg_xfer = total_xfer / nb
-                avg_comp = total_comp / nb
-                print(colored(f"\nTiming summary (per batch): H2D avg {avg_xfer:.2f} ms | Compute avg {avg_comp:.2f} ms | batches {nb}", "green"))
+        if use_index and self._stats["num_batches"] > 0:
+            total_xfer = self._stats["total_xfer_ms"]
+            total_comp = self._stats["total_compute_ms"]
+            nb = self._stats["num_batches"]
+            avg_xfer = total_xfer / nb
+            avg_comp = total_comp / nb
+            print(colored(f"\nTiming summary (per batch): H2D avg {avg_xfer:.2f} ms | Compute avg {avg_comp:.2f} ms | batches {nb}", "green"))
         return outputs
