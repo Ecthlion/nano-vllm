@@ -8,7 +8,7 @@ from nanovllm.engine.sequence import Sequence
 
 
 class KVCacheIndex:
-    # TODO: cpu cache -> ssd
+    # TODO: cpu cache overflow ssd
     def __init__(self, gpu_kv_cache, index_name="imdb_kvcache.pt") -> None:
         # Tensor[2, num_layers, num_blocks, block_size, num_kv_heads, head_dim]
         self.gpu_kv_cache = gpu_kv_cache
@@ -113,6 +113,7 @@ class KVCacheIndex:
                             dst = self.gpu_kv_cache[kv_idx, layer_idx, block_id, :block_tokens]
                             src = cpu_kv_cache[kv_idx, layer_idx, token_offset : token_offset + block_tokens]
                             # One copy: CPU -> GPU (non_blocking if src pinned)
+                            # TODO: copy [num_cached_tokens:text_token_len]
                             dst.copy_(src, non_blocking=True)
                             any_copied = True
 

@@ -60,22 +60,29 @@ def main():
     # Init
     path = os.path.expanduser("/data/zwt/model/models/Qwen/Qwen3-8B/")
     tokenizer = AutoTokenizer.from_pretrained(path)
-    llm = LLM(path, enforce_eager=False, tensor_parallel_size=1)
+    llm = LLM(path, enforce_eager=True, tensor_parallel_size=1)
     max_output_len = 1
+    num_input_lines = 1000
     sampling_params = SamplingParams(temperature=1, max_tokens=max_output_len)
     dataset = ImdbDataset()
 
     ###################################################################
+    num_warmup = 10
     if not llm.kv_cache_index.indexed:
-        print(colored("\nBuild index", "yellow"))
-        base_prompt = ""
-        samples, base_token_len = dataset.sample(tokenizer, base_prompt, 1000)
-        sampling_params.base_token_len = base_token_len
+        num_warmup = num_input_lines
 
-        start = time()
-        outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
-        end = time()
-        print(colored(f"Build index time: {(end - start):.4f} s", "blue"))
+    print(colored("\nBuild index / Warm up", "yellow"))
+    base_prompt = " "
+    samples, base_token_len = dataset.sample(tokenizer, base_prompt, num_warmup)
+    sampling_params.base_token_len = base_token_len
+
+    start = time()
+    outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
+    end = time()
+    print(colored(f"Build index time: {(end - start):.4f} s", "blue"))
+
+    # remove prefix cache
+    llm.scheduler.block_manager.reset()
 
     ###################################################################
     # print(colored("Task1: suitable for kids", "yellow"))
@@ -103,13 +110,13 @@ def main():
     ###################################################################
     print(colored("\nTask2: sentiment", "yellow"))
     base_prompt = f'Given the above film review, answer whether the sentiment is "positive" or "negative". Respond ONLY with "positive" or "negative", in all lower case.\n'
-    samples, base_token_len = dataset.sample(tokenizer, base_prompt, 1000)
+    samples, base_token_len = dataset.sample(tokenizer, base_prompt, num_input_lines)
     sampling_params.base_token_len = base_token_len
 
     # with profile(
     #     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
     #     profile_memory=True,
-    #     with_stack=True,
+    #     with_stack=False,
     # ) as prof:
     start = time()
     outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)

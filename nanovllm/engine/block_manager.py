@@ -32,6 +32,9 @@ class BlockManager:
         self.free_block_ids: deque[int] = deque(range(num_blocks))
         self.used_block_ids: set[int] = set()
 
+    def reset(self):
+        self.hash_to_block_id: dict[int, int] = dict()
+
     @classmethod
     def compute_hash(cls, token_ids: list[int], prefix: int = -1):
         h = xxhash.xxh64()

@@ -103,7 +103,8 @@ class LLMEngine:
                 transfer_event = None
                 xfer_ms = 0.0
                 if self._transfer_stream is not None:
-                    ret = self.kv_cache_index.get_kv_cache(seqs, stream=self._transfer_stream, return_timing=True)
+                    with record_function("get kv index"):
+                        ret = self.kv_cache_index.get_kv_cache(seqs, stream=self._transfer_stream, return_timing=True)
                     # Wait for H2D completion before marking ready, to guarantee compute sees ready KV
                     if ret is not None:
                         if isinstance(ret, tuple):
@@ -123,6 +124,8 @@ class LLMEngine:
                 self._ready_batches.put_nowait(([], False, 0.0))
             except Exception:
                 pass
+
+            self._prefetch_thread = None
 
         self._prefetch_thread = threading.Thread(target=_prefetch_loop, name="kv-prefetch", daemon=True)
         self._prefetch_thread.start()
@@ -152,7 +155,8 @@ class LLMEngine:
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
         start_event.record()
-        token_ids = self.model_runner.call("run", seqs, is_prefill)
+        with record_function("run model"):
+            token_ids = self.model_runner.call("run", seqs, is_prefill)
         end_event.record()
         end_event.synchronize()
         compute_ms = start_event.elapsed_time(end_event)
@@ -222,4 +226,9 @@ class LLMEngine:
             avg_xfer = total_xfer / nb
             avg_comp = total_comp / nb
             print(colored(f"\nTiming summary (per batch): H2D avg {avg_xfer:.2f} ms | Compute avg {avg_comp:.2f} ms | batches {nb}", "green"))
+            self._stats = {
+                "total_xfer_ms": 0.0,
+                "total_compute_ms": 0.0,
+                "num_batches": 0,
+            }
         return outputs

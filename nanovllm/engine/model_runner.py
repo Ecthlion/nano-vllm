@@ -5,6 +5,8 @@ import torch.distributed as dist
 from multiprocessing.synchronize import Event
 from multiprocessing.shared_memory import SharedMemory
 
+from torch.profiler import record_function
+
 from nanovllm.config import Config
 from nanovllm.engine.sequence import Sequence
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
@@ -34,6 +36,7 @@ class ModelRunner:
         self.sampler = Sampler()
         self.warmup_model()
         self.allocate_kv_cache()
+        # self.warmup_model_with_cache()
         if not self.enforce_eager:
             self.capture_cudagraph()
         torch.set_default_device("cpu")
@@ -97,6 +100,21 @@ class ModelRunner:
         seqs = [Sequence([0] * max_model_len) for _ in range(num_seqs)]
         self.run(seqs, True)
         torch.cuda.empty_cache()
+
+    # def warmup_model_with_cache(self):
+    #     block_size = self.config.kvcache_block_size
+    #     # 1. prefill warmup
+    #     seq = Sequence([0] * block_size)
+    #     # fake block table
+    #     seq.block_table.append(0)
+    #     self.run([seq], True)
+    #
+    #     # 2. prefix cache warmup
+    #     seq = Sequence([0] * block_size * 2)
+    #     seq.num_cached_tokens = block_size
+    #     # fake block table
+    #     seq.block_table.extend([0, 1])
+    #     self.run([seq], True)
 
     def allocate_kv_cache(self):
         config = self.config
@@ -221,8 +239,9 @@ class ModelRunner:
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
-        logits = self.run_model(input_ids, positions, is_prefill)
-        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
+        with record_function("forward"):
+            logits = self.run_model(input_ids, positions, is_prefill)
+            token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
         reset_context()
         return token_ids
 
