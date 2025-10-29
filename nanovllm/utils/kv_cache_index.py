@@ -15,6 +15,8 @@ class KVCacheIndex:
         self.path = f"/data/zwt/{index_name}"
         self.dirty = False
         self.indexed = False
+        # Dedicated stream for GPU->CPU transfers to avoid stalling default stream
+        self._d2h_stream: torch.cuda.Stream = torch.cuda.Stream()
 
         # text_id -> kv_cache[2, num_layers, seq_len, num_kv_heads, head_dim]
         self.kv_cache_index: dict = {}
@@ -23,57 +25,52 @@ class KVCacheIndex:
             self.indexed = True
 
     def store_kv_cache(self, seqs: list[Sequence]):
-        for seq in seqs:
-            if seq.text_id is None or seq.text_id in self.kv_cache_index:
-                continue
+        """
+        Asynchronously copy KV cache from GPU blocks to a contiguous, pinned CPU buffer
+        per sequence for indexing. Uses a dedicated D2H CUDA stream and does not perform
+        a global device synchronize to maximize overlap with compute.
+        """
+        _, num_layers, _, block_size, num_kv_heads, head_dim = self.gpu_kv_cache.shape
+        # Schedule all copies on a dedicated stream to avoid blocking default stream
+        with torch.cuda.stream(self._d2h_stream):
+            for seq in seqs:
+                if seq.text_id is None or seq.text_id in self.kv_cache_index:
+                    continue
 
-            # 1. Allocate cpu mem for kv cache transfer
-            _, num_layers, _, block_size, num_kv_heads, head_dim = (
-                self.gpu_kv_cache.shape
-            )
+                # 1. Allocate cpu mem for kv cache transfer (pinned for async D2H)
+                cpu_kv_cache = torch.empty(
+                    2,
+                    num_layers,
+                    seq.text_token_len,
+                    num_kv_heads,
+                    head_dim,
+                    device="cpu",
+                    dtype=self.gpu_kv_cache.dtype,
+                    pin_memory=True,
+                )
 
-            cpu_kv_cache = torch.empty(
-                2,
-                num_layers,
-                seq.text_token_len,
-                num_kv_heads,
-                head_dim,
-                device="cpu",
-                dtype=self.gpu_kv_cache.dtype,
-                pin_memory=True,
-            )
+                # 2. gpu_kv_cache -> cpu_kv_cache
+                for kv_idx in range(2):
+                    for layer_idx in range(num_layers):
+                        token_offset = 0  # reset for each layer
+                        for block_id in seq.block_table:
+                            remaining = seq.text_token_len - token_offset
+                            if remaining <= 0:
+                                break
+                            block_tokens = remaining if remaining < block_size else block_size
 
-            # 2. gpu_kv_cache -> cpu_kv_cache
-            for kv_idx in range(2):
-                for layer_idx in range(num_layers):
-                    token_offset = 0  # reset for each layer
-                    for block_id in seq.block_table:
-                        if token_offset + block_size > seq.text_token_len:
-                            block_tokens = seq.text_token_len - token_offset
-                        else:
-                            block_tokens = block_size
+                            dst = cpu_kv_cache[
+                                kv_idx, layer_idx, token_offset : token_offset + block_tokens
+                            ]
+                            src = self.gpu_kv_cache[kv_idx, layer_idx, block_id, :block_tokens]
+                            # Async D2H copy. Pinned dst enables non_blocking behavior.
+                            dst.copy_(src, non_blocking=True)
 
-                        if block_tokens <= 0:
-                            break
+                            token_offset += block_tokens
 
-                        dst = cpu_kv_cache[
-                            kv_idx,
-                            layer_idx,
-                            token_offset : token_offset + block_tokens,
-                        ]
-                        src = self.gpu_kv_cache[
-                            kv_idx, layer_idx, block_id, :block_tokens
-                        ]
-                        dst.copy_(src, non_blocking=True)
-
-                        token_offset += block_tokens
-                        if token_offset >= seq.text_token_len:
-                            break
-
-            self.dirty = True
-            self.kv_cache_index[seq.text_id] = cpu_kv_cache
-
-        torch.cuda.synchronize()
+                self.dirty = True
+                self.kv_cache_index[seq.text_id] = cpu_kv_cache
+        # No global synchronize here; let transfers overlap with subsequent work
 
     def get_kv_cache(
         self,
@@ -101,10 +98,14 @@ class KVCacheIndex:
                 if cpu_kv_cache is None:
                     continue
 
+                # Only copy tokens that aren't already cached (full blocks only)
+                start_token = seq.num_cached_tokens
+                start_block_idx = start_token // block_size
                 for kv_idx in range(2):
                     for layer_idx in range(num_layers):
-                        token_offset = 0
-                        for block_id in seq.block_table:
+                        token_offset = start_token
+                        # Skip fully cached leading blocks
+                        for block_id in seq.block_table[start_block_idx:]:
                             remaining = seq.text_token_len - token_offset
                             if remaining <= 0:
                                 break
@@ -113,13 +114,10 @@ class KVCacheIndex:
                             dst = self.gpu_kv_cache[kv_idx, layer_idx, block_id, :block_tokens]
                             src = cpu_kv_cache[kv_idx, layer_idx, token_offset : token_offset + block_tokens]
                             # One copy: CPU -> GPU (non_blocking if src pinned)
-                            # TODO: copy [num_cached_tokens:text_token_len]
                             dst.copy_(src, non_blocking=True)
                             any_copied = True
 
                             token_offset += block_tokens
-                            if token_offset >= seq.text_token_len:
-                                break
 
                 # the prefix is already considered (the copies will be visible after event completes)
                 seq.num_cached_tokens = seq.text_token_len
@@ -139,5 +137,10 @@ class KVCacheIndex:
 
     def persistence(self):
         if self.dirty:
+            # Ensure any outstanding D2H transfers have completed before saving
+            try:
+                self._d2h_stream.synchronize()
+            except Exception:
+                pass
             torch.save(self.kv_cache_index, self.path)
         self.dirty = False
