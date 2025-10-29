@@ -71,6 +71,10 @@ class LLMEngine:
             prompt = (prompt[0], self.tokenizer.encode(prompt[1]))
 
         seq = Sequence(prompt, sampling_params) # type: ignore
+        # Pre-reserve pinned CPU buffer for KV cache of indexed sequences to avoid
+        # cudaHostAlloc in the hot path (observed to block compute)
+        if seq.text_id is not None and not self.kv_cache_index.is_indexed(seq):
+            self.kv_cache_index.reserve(seq)
         self.scheduler.add(seq)
 
     def _ensure_prefetcher(self):

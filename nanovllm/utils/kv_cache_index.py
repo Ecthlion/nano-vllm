@@ -16,13 +16,44 @@ class KVCacheIndex:
         self.dirty = False
         self.indexed = False
         # Dedicated stream for GPU->CPU transfers to avoid stalling default stream
-        self._d2h_stream: torch.cuda.Stream = torch.cuda.Stream()
+        self._d2h_stream = torch.cuda.Stream()
 
         # text_id -> kv_cache[2, num_layers, seq_len, num_kv_heads, head_dim]
         self.kv_cache_index: dict = {}
+        # Reserved pinned buffers not yet filled from GPU (avoid cudaHostAlloc on hot path)
+        self._reserved = {}
         if os.path.isfile(self.path):
             self.kv_cache_index = torch.load(self.path)
             self.indexed = True
+            # Ensure tensors are pinned up-front to avoid runtime cudaHostAlloc
+            for id, kv_cache in list(self.kv_cache_index.items()):
+                if isinstance(kv_cache, torch.Tensor) and not kv_cache.is_pinned():
+                    pinned = torch.empty_like(kv_cache, pin_memory=True)
+                    pinned.copy_(kv_cache)
+                    self.kv_cache_index[id] = pinned
+
+    def _alloc_cpu_kv(self, seq_len: int) -> torch.Tensor:
+        """Allocate a pinned CPU KV buffer of the correct shape."""
+        _, num_layers, _, _, num_kv_heads, head_dim = self.gpu_kv_cache.shape
+        return torch.empty(
+            2,
+            num_layers,
+            seq_len,
+            num_kv_heads,
+            head_dim,
+            device="cpu",
+            dtype=self.gpu_kv_cache.dtype,
+            pin_memory=True,
+        )
+
+    def reserve(self, seq: Sequence):
+        """Pre-allocate pinned CPU buffer for a sequence's KV to avoid cudaHostAlloc on hot path."""
+        if seq.text_id is None:
+            return
+        if seq.text_id in self.kv_cache_index or seq.text_id in self._reserved:
+            return
+        cpu_kv = self._alloc_cpu_kv(seq.text_token_len)
+        self._reserved[seq.text_id] = cpu_kv
 
     def store_kv_cache(self, seqs: list[Sequence]):
         """
@@ -35,19 +66,14 @@ class KVCacheIndex:
         with torch.cuda.stream(self._d2h_stream):
             for seq in seqs:
                 if seq.text_id is None or seq.text_id in self.kv_cache_index:
+                    # If already indexed, skip
                     continue
 
-                # 1. Allocate cpu mem for kv cache transfer (pinned for async D2H)
-                cpu_kv_cache = torch.empty(
-                    2,
-                    num_layers,
-                    seq.text_token_len,
-                    num_kv_heads,
-                    head_dim,
-                    device="cpu",
-                    dtype=self.gpu_kv_cache.dtype,
-                    pin_memory=True,
-                )
+                # 1. Reuse pre-allocated pinned buffer if available (preferred)
+                cpu_kv_cache = self._reserved.pop(seq.text_id, None)
+                if cpu_kv_cache is None or not isinstance(cpu_kv_cache, torch.Tensor) or cpu_kv_cache.shape[2] != seq.text_token_len:
+                    # Fallback allocate (should be rare if reserve() is used)
+                    cpu_kv_cache = self._alloc_cpu_kv(seq.text_token_len)
 
                 # 2. gpu_kv_cache -> cpu_kv_cache
                 for kv_idx in range(2):

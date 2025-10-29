@@ -62,7 +62,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(path)
     llm = LLM(path, enforce_eager=False, tensor_parallel_size=1)
     max_output_len = 1
-    num_input_lines = 250
+    num_input_lines = 1000
     sampling_params = SamplingParams(temperature=1, max_tokens=max_output_len)
     dataset = ImdbDataset()
 
@@ -76,14 +76,14 @@ def main():
     samples, base_token_len = dataset.sample(tokenizer, base_prompt, num_warmup)
     sampling_params.base_token_len = base_token_len
 
-    # with profile(
-    #     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-    #     profile_memory=True,
-    #     with_stack=False,
-    # ) as prof:
-    start = time()
-    outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
-    end = time()
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        profile_memory=True,
+        with_stack=False,
+    ) as prof:
+        start = time()
+        outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
+        end = time()
     # prof.export_chrome_trace("trace_task1.json")
 
     print(colored(f"Build index time: {(end - start):.4f} s", "blue"))
