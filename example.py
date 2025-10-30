@@ -62,7 +62,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(path)
     llm = LLM(path, enforce_eager=False, tensor_parallel_size=1)
     max_output_len = 1
-    num_input_lines = 1000
+    num_input_lines = 250
     sampling_params = SamplingParams(temperature=1, max_tokens=max_output_len)
     dataset = ImdbDataset()
 
@@ -84,7 +84,7 @@ def main():
         start = time()
         outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
         end = time()
-    # prof.export_chrome_trace("trace_task1.json")
+    prof.export_chrome_trace("trace_task1.json")
 
     print(colored(f"Build index time: {(end - start):.4f} s", "blue"))
 
@@ -128,7 +128,7 @@ def main():
         start = time()
         outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
         end = time()
-    # prof.export_chrome_trace("trace_task2.json")
+    prof.export_chrome_trace("trace_task2.json")
 
     print(colored(f"Total generate time: {( end - start ):.4f} s", "blue"))
     print(f"output: {len(outputs)}")

@@ -82,7 +82,8 @@ class Scheduler:
                 seq.append_token(token_id)
                 if (not seq.ignore_eos and token_id == self.eos) or seq.num_completion_tokens == seq.max_tokens:
                     seq.status = SequenceStatus.FINISHED
-                    self.block_manager.deallocate(seq)
+                    if not seq.lock_block:
+                        self.block_manager.deallocate(seq)
                     try:
                         self.running.remove(seq)
                     except Exception as e:

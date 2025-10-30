@@ -1,4 +1,5 @@
 from collections import deque
+import threading
 import xxhash
 import numpy as np
 
@@ -31,6 +32,7 @@ class BlockManager:
         self.hash_to_block_id: dict[int, int] = dict()
         self.free_block_ids: deque[int] = deque(range(num_blocks))
         self.used_block_ids: set[int] = set()
+        self._lock = threading.Lock()
 
     def reset(self):
         self.hash_to_block_id: dict[int, int] = dict()
@@ -85,13 +87,14 @@ class BlockManager:
             seq.block_table.append(block_id)
 
     def deallocate(self, seq: Sequence):
-        for block_id in reversed(seq.block_table):
-            block = self.blocks[block_id]
-            block.ref_count -= 1
-            if block.ref_count == 0:
-                self._deallocate_block(block_id)
-        seq.num_cached_tokens = 0
-        seq.block_table.clear()
+        with self._lock:
+            for block_id in reversed(seq.block_table):
+                block = self.blocks[block_id]
+                block.ref_count -= 1
+                if block.ref_count == 0:
+                    self._deallocate_block(block_id)
+            seq.num_cached_tokens = 0
+            seq.block_table.clear()
 
     def can_append(self, seq: Sequence) -> bool:
         return len(self.free_block_ids) >= (len(seq) % self.block_size == 1)
