@@ -26,6 +26,9 @@ class ModelRunner:
         self.rank = rank
         self.event = event
 
+        self.d2h_stream = torch.cuda.Stream()
+        self._host_tokens = None
+
         dist.init_process_group("nccl", "tcp://localhost:2334", world_size=self.world_size, rank=rank)
         torch.cuda.set_device(rank)
         default_dtype = torch.get_default_dtype()
@@ -241,7 +244,22 @@ class ModelRunner:
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         with record_function("forward"):
             logits = self.run_model(input_ids, positions, is_prefill)
-            token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
+            if self.rank == 0:
+                tokens = self.sampler(logits, temperatures)  # GPU 张量
+                if tokens.is_cuda:
+                    if self._host_tokens is None or self._host_tokens.numel() != tokens.numel():
+                        self._host_tokens = torch.empty_like(tokens, device="cpu", pin_memory=True)
+                    compute_end = torch.cuda.Event()
+                    torch.cuda.current_stream().record_event(compute_end)
+                    with torch.cuda.stream(self.d2h_stream):
+                        self.d2h_stream.wait_event(compute_end)
+                        self._host_tokens.copy_(tokens, non_blocking=True)  # Device -> Pinned
+                    self.d2h_stream.synchronize()
+                    token_ids = self._host_tokens.tolist()
+                else:
+                    token_ids = tokens.tolist()
+            else:
+                token_ids = None
         reset_context()
         return token_ids
 

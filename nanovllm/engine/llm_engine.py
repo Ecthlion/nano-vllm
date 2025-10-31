@@ -145,7 +145,7 @@ class LLMEngine:
 
         def _store_loop():
             assert self._ready2store is not None
-            while not self._stop_store.is_set():
+            while not self._stop_store.is_set() or not self._ready2store.empty():
                 # Kick off H2D KV transfer if indexed
                 transfer_event = None
                 seqs = self._ready2store.get()
