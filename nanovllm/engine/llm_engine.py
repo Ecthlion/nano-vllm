@@ -131,6 +131,7 @@ class LLMEngine:
                 pass
 
             self._prefetch_thread = None
+            print(colored("prefetch thread quit!", "red"))
 
         self._prefetch_thread = threading.Thread(target=_prefetch_loop, name="kv-prefetch", daemon=True)
         self._prefetch_thread.start()
@@ -159,14 +160,16 @@ class LLMEngine:
                             transfer_event, start_event = ret, None
                         transfer_event.synchronize()
 
-                        for seq in seqs:
-                            # WARN: may cause conflict
-                            seq.lock_block = False
-                            self.scheduler.block_manager.deallocate(seq)
-
                         if start_event is not None:
                             print(f"store kv cache: {start_event.elapsed_time(transfer_event)}")
+
+                    # deallocate blocks here
+                    for seq in seqs:
+                        # WARN: may cause conflict
+                        seq.lock_block = False
+                        self.scheduler.block_manager.deallocate(seq)
             self._store_thread = None
+            print(colored("store thread quit!", "red"))
 
         self._store_thread = threading.Thread(target=_store_loop, name="kv-prefetch", daemon=True)
         self._store_thread.start()
