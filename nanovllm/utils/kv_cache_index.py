@@ -1,5 +1,5 @@
 import os
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import torch
@@ -129,6 +129,8 @@ class KVCacheIndex:
                 # Only copy tokens that aren't already cached (full blocks only)
                 start_token = seq.num_cached_tokens
                 start_block_idx = start_token // block_size
+                # gpu_kv_cache[2, num_layers, num_blocks, block_size, num_kv_heads, head_dim]
+                # cpu_kv_cache[2, num_layers, seq_len, num_kv_heads, head_dim]
                 for kv_idx in range(2):
                     for layer_idx in range(num_layers):
                         token_offset = start_token
@@ -172,6 +174,67 @@ class KVCacheIndex:
         return seq.text_id and seq.text_id in self.kv_cache_index
 
     def persistence(self):
+        # TODO: pruning kv cache
         if self.dirty:
             torch.save(self.kv_cache_index, self.path)
         self.dirty = False
+
+
+# Triton can only load GPU memory, so useless for now
+
+# @triton.jit
+# def get_kv_cache_kernel(
+#     cpu_key_ptr,
+#     cpu_value_ptr,
+#     gpu_key_ptr,
+#     gpu_value_ptr,
+#     slot_mapping_ptr,
+#     cpu_layer_stride,
+#     gpu_layer_stride,
+#     num_layers: tl.constexpr,
+#     D: tl.constexpr,
+# ):
+#     idx = tl.program_id(0)
+#     slot = tl.load(slot_mapping_ptr + idx)
+#     if slot == -1:
+#         return
+#     for i in range(num_layers):
+#         # offsets for source (key/value) rows
+#         cpu_offsets = i * cpu_layer_stride + idx * D + tl.arange(0, D)
+#         key = tl.load(cpu_key_ptr + cpu_offsets)
+#         value = tl.load(cpu_value_ptr + cpu_offsets)
+#
+#         # offsets for destination cache (flattened)
+#         gpu_offsets = i * gpu_layer_stride + slot * D + tl.arange(0, D)
+#         tl.store(gpu_key_ptr + gpu_offsets, key)
+#         tl.store(gpu_value_ptr + gpu_offsets, value)
+#
+#
+# def get_kv_cache(
+#     gpu_key_cache: torch.Tensor,
+#     gpu_value_cache: torch.Tensor,
+#     cpu_key_cache: torch.Tensor,
+#     cpu_value_cache: torch.Tensor,
+#     slot_mapping: torch.Tensor,
+# ):
+#     # get cpu to gpu
+#     # gpu_key, gpu_value: [num_layers, num_blocks * block_size, num_heads, head_dim]
+#     # cpu_key, cpu_value: [num_layers, seq_len, num_heads, head_dim]
+#
+#     num_layers, _, num_heads, head_dim = gpu_key_cache.shape
+#     _, seq_len, num_heads, head_dim = cpu_key_cache.shape
+#
+#     D = num_heads * head_dim
+#     assert slot_mapping.numel() == seq_len
+#     # Launch one program per token for every layers to scatter into cache
+#     get_kv_cache_kernel[(seq_len,)](
+#         cpu_key_cache,
+#         cpu_value_cache,
+#         gpu_key_cache,
+#         gpu_value_cache,
+#         slot_mapping,
+#         cpu_key_cache.stride(0),
+#         gpu_key_cache.stride(0),
+#         num_layers,  # type: ignore
+#         D,  # type: ignore
+#     )
