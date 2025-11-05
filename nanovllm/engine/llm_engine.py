@@ -44,6 +44,7 @@ class LLMEngine:
         self._prefetch_thread: threading.Thread | None = None
         self._ready2prefetch: Queue | None = None
         self._stop_prefetch = threading.Event()
+        self._cancel_prefetch = threading.Event()
         self._prefetch_stream: torch.cuda.Stream | None = None
 
         # Store machinery
@@ -88,6 +89,7 @@ class LLMEngine:
 
         def _prefetch_loop():
             assert self._ready2prefetch is not None
+            self._prefetch_stream = torch.cuda.Stream()
             while not self._stop_prefetch.is_set():
                 # If queue is full, wait a bit
                 if self._ready2prefetch.full():
@@ -109,19 +111,19 @@ class LLMEngine:
                 xfer_ms = 0.0
                 if self._prefetch_stream is not None:
                     with record_function("get kv index"):
-                        ret = self.kv_cache_index.get_kv_cache(seqs, stream=self._prefetch_stream, return_timing=True)
+                        ret = self.kv_cache_index.get_kv_cache(seqs, stream=self._prefetch_stream, return_timing=True, cancel_event=self._cancel_prefetch)
                     # Wait for H2D completion before marking ready, to guarantee compute sees ready KV
+                    if self._cancel_prefetch.is_set():
+                        self._cancel_prefetch.clear()
+
                     if ret is not None:
                         if isinstance(ret, tuple):
                             transfer_event, start_event = ret
                         else:
                             transfer_event, start_event = ret, None
-                        transfer_event.synchronize()
+                        self._prefetch_stream.synchronize()
                         if start_event is not None:
-                            try:
-                                xfer_ms = start_event.elapsed_time(transfer_event)
-                            except Exception:
-                                xfer_ms = 0.0
+                            xfer_ms = start_event.elapsed_time(transfer_event)
                 # Enqueue ready batch for compute
                 self._ready2prefetch.put((seqs, is_prefill, xfer_ms))
             # Signal termination with sentinel
@@ -179,13 +181,15 @@ class LLMEngine:
         if use_index:
             assert self._ready2prefetch is not None, "Prefetcher not initialized"
             # Pop a ready batch (blocks until available or sentinel)
-            item = self._ready2prefetch.get()
+            try:
+                item = self._ready2prefetch.get_nowait()
+                # item = self._ready2prefetch.get()
+            except Empty:
+                self._cancel_prefetch.set()
+                item = self._ready2prefetch.get()
+
             # backward-compat if queue carries 2-tuple
-            if isinstance(item, tuple) and len(item) == 3:
-                seqs, is_prefill, xfer_ms = item
-            else:
-                seqs, is_prefill = item  # type: ignore
-                xfer_ms = 0.0
+            seqs, is_prefill, xfer_ms = item
             if not seqs and self.scheduler.is_finished():
                 return [], 0
             print(colored(f"schedule {len(seqs)} seq", "magenta"))
@@ -226,6 +230,7 @@ class LLMEngine:
         use_tqdm: bool = True,
         use_index: bool = False,
     ) -> list[dict]:
+        start = time()
         self.use_index = use_index
         if use_tqdm:
             pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True)
@@ -239,6 +244,8 @@ class LLMEngine:
             self._ensure_storer()
         outputs = {}
         prefill_throughput = decode_throughput = 0.
+        end = time()
+        print(f"init: {end - start}")
         while not self.is_finished():
             t = perf_counter()
             output, num_tokens = self.step(use_index)
@@ -259,6 +266,7 @@ class LLMEngine:
         outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
         if use_tqdm:
             pbar.close() # type: ignore
+        torch.cuda.synchronize()
         if use_index and self._stats["num_batches"] > 0:
             total_xfer = self._stats["total_xfer_ms"]
             total_comp = self._stats["total_compute_ms"]

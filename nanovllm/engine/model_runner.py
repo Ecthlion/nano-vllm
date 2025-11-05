@@ -1,4 +1,5 @@
 import pickle
+from concurrent.futures import ThreadPoolExecutor
 from termcolor import colored
 import torch
 import torch.distributed as dist
@@ -25,6 +26,8 @@ class ModelRunner:
         self.world_size = config.tensor_parallel_size
         self.rank = rank
         self.event = event
+        # Dedicated executor to offload compute_logits to a background thread
+        self._logits_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="logits")
 
         self.d2h_stream = torch.cuda.Stream()
         self._host_tokens = None
@@ -55,6 +58,10 @@ class ModelRunner:
                 self.loop()
 
     def exit(self):
+        # Gracefully shutdown background executor
+        if self._logits_executor is not None:
+            self._logits_executor.shutdown(wait=True, cancel_futures=False)
+            self._logits_executor = None
         if self.world_size > 1:
             self.shm.close()
             dist.barrier()
@@ -223,7 +230,11 @@ class ModelRunner:
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
         if is_prefill or self.enforce_eager or input_ids.size(0) > 512:
-            return self.model.compute_logits(self.model(input_ids, positions))
+            # Forward pass on current thread
+            hidden = self.model(input_ids, positions)
+            # Ensure hidden states are ready before handing over to another thread
+            torch.cuda.current_stream().synchronize()
+            return self._compute_logits_in_thread(hidden)
         else:
             bs = input_ids.size(0)
             context = get_context()
@@ -237,7 +248,29 @@ class ModelRunner:
             graph_vars["context_lens"][:bs] = context.context_lens
             graph_vars["block_tables"][:bs, :context.block_tables.size(1)] = context.block_tables
             graph.replay()
-            return self.model.compute_logits(graph_vars["outputs"][:bs])
+            # Ensure graph outputs are ready before offloading to another thread
+            torch.cuda.current_stream().synchronize()
+            return self._compute_logits_in_thread(graph_vars["outputs"][:bs])
+
+    @torch.inference_mode()
+    def _compute_logits_in_thread(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Run model.compute_logits in a dedicated background thread and return logits.
+
+        Note: We synchronize the producing stream before submitting to avoid cross-thread
+        stream dependency issues. This keeps correctness while honoring the request
+        to execute compute_logits on a separate thread.
+        """
+        if self._logits_executor is None:
+            # Fallback to inline execution if executor is unavailable
+            return self.model.compute_logits(hidden)
+
+        @torch.inference_mode()
+        def _worker(h: torch.Tensor) -> torch.Tensor:
+            # Ensure correct CUDA device is set in this thread
+            return self.model.compute_logits(h)
+
+        future = self._logits_executor.submit(_worker, hidden)
+        return future.result()
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)

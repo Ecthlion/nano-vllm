@@ -120,15 +120,15 @@ def main():
     samples, base_token_len = dataset.sample(tokenizer, base_prompt, num_input_lines)
     sampling_params.base_token_len = base_token_len
 
-    with profile(
-        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-        profile_memory=True,
-        with_stack=False,
-    ) as prof:
-        start = time()
-        outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
-        end = time()
-    prof.export_chrome_trace("trace_task2.json")
+    # with profile(
+    #     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    #     profile_memory=True,
+    #     with_stack=False,
+    # ) as prof:
+    start = time()
+    outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
+    end = time()
+    # prof.export_chrome_trace("trace_task2.json")
 
     print(colored(f"Total generate time: {( end - start ):.4f} s", "blue"))
     print(f"output: {len(outputs)}")

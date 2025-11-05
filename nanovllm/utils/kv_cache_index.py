@@ -1,4 +1,5 @@
 import os
+from threading import Event
 from typing import Optional
 
 import numpy as np
@@ -101,6 +102,7 @@ class KVCacheIndex:
     def get_kv_cache(
         self,
         seqs: list[Sequence],
+        cancel_event: Event,
         stream: Optional[torch.cuda.Stream] = None,
         return_timing: bool = False,
     ):
@@ -129,20 +131,24 @@ class KVCacheIndex:
                 # Only copy tokens that aren't already cached (full blocks only)
                 start_token = seq.num_cached_tokens
                 start_block_idx = start_token // block_size
+                token_offset = start_token
                 # gpu_kv_cache[2, num_layers, num_blocks, block_size, num_kv_heads, head_dim]
                 # cpu_kv_cache[2, num_layers, seq_len, num_kv_heads, head_dim]
-                for kv_idx in range(2):
-                    for layer_idx in range(num_layers):
-                        token_offset = start_token
-                        # Skip fully cached leading blocks
-                        for block_id in seq.block_table[start_block_idx:]:
-                            remaining = seq.text_token_len - token_offset
-                            if remaining <= 0:
-                                break
-                            block_tokens = (
-                                remaining if remaining < block_size else block_size
-                            )
+                # Skip fully cached leading blocks
+                for block_id in seq.block_table[start_block_idx:]:
+                    if cancel_event.is_set():
+                        break
 
+                    remaining = seq.text_token_len - token_offset
+                    if remaining <= 0:
+                        break
+
+                    block_tokens = (
+                        remaining if remaining < block_size else block_size
+                    )
+
+                    for kv_idx in range(2):
+                        for layer_idx in range(num_layers):
                             dst = self.gpu_kv_cache[
                                 kv_idx, layer_idx, block_id, :block_tokens
                             ]
@@ -155,10 +161,8 @@ class KVCacheIndex:
                             dst.copy_(src, non_blocking=True)
                             any_copied = True
 
-                            token_offset += block_tokens
-
-                # the prefix is already considered (the copies will be visible after event completes)
-                seq.num_cached_tokens = seq.text_token_len
+                    token_offset += block_tokens
+                    seq.num_cached_tokens = token_offset
 
         if any_copied:
             event = torch.cuda.Event(blocking=False, enable_timing=return_timing)
