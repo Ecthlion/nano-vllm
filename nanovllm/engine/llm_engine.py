@@ -1,20 +1,21 @@
 import atexit
 import threading
-from queue import Queue, Empty
 from dataclasses import fields
-from time import perf_counter, time
+from queue import Empty, Queue
+from time import perf_counter, sleep, time
+
+import torch
+import torch.multiprocessing as mp
 from termcolor import colored
 from torch.profiler import record_function
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
-import torch
-import torch.multiprocessing as mp
 
 from nanovllm.config import Config
-from nanovllm.sampling_params import SamplingParams
-from nanovllm.engine.sequence import Sequence
-from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.model_runner import ModelRunner
+from nanovllm.engine.scheduler import Scheduler
+from nanovllm.engine.sequence import Sequence
+from nanovllm.sampling_params import SamplingParams
 from nanovllm.utils.kv_cache_index import KVCacheIndex
 
 
@@ -27,7 +28,7 @@ class LLMEngine:
         self.ps = []
         self.events = []
         ctx = mp.get_context("spawn")
-        assert(config.tensor_parallel_size == 1) # not supported for now
+        assert config.tensor_parallel_size == 1  # not supported for now
         for i in range(1, config.tensor_parallel_size):
             event = ctx.Event()
             process = ctx.Process(target=ModelRunner, args=(config, i, event))
@@ -35,23 +36,21 @@ class LLMEngine:
             self.ps.append(process)
             self.events.append(event)
         self.model_runner = ModelRunner(config, 0, self.events)
-        self.kv_cache_index = KVCacheIndex(self.model_runner.kv_cache, index_name="imdb_kvcache.pt")
+        self.kv_cache_index = KVCacheIndex(
+            self.model_runner.kv_cache, index_name="imdb_kvcache.pt"
+        )
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
         self.scheduler = Scheduler(config)
 
         # Prefetch machinery
-        self._prefetch_thread: threading.Thread | None = None
-        self._ready2prefetch: Queue | None = None
-        self._stop_prefetch = threading.Event()
+        self._prefetch_thread: threading.Thread
+        self._prefetch_queue: Queue
         self._cancel_prefetch = threading.Event()
-        self._prefetch_stream: torch.cuda.Stream | None = None
 
         # Store machinery
-        self._store_thread: threading.Thread | None = None
-        self._ready2store: Queue | None = None
-        self._stop_store = threading.Event()
-        self._store_stream: torch.cuda.Stream | None = None
+        self._store_thread: threading.Thread
+        self._store_queue: Queue
 
         # Stats
         self._stats = {
@@ -70,32 +69,23 @@ class LLMEngine:
         for p in self.ps:
             p.join()
 
-    def add_request(self, prompt: str | list[int] | tuple[int, str], sampling_params: SamplingParams):
+    def add_request(
+        self, prompt: str | list[int] | tuple[int, str], sampling_params: SamplingParams
+    ):
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
         elif isinstance(prompt, tuple):
             prompt = (prompt[0], self.tokenizer.encode(prompt[1]))
 
-        seq = Sequence(prompt, sampling_params) # type: ignore
+        seq = Sequence(prompt, sampling_params)  # type: ignore
         self.scheduler.add(seq)
 
-    def _ensure_prefetcher(self):
-        if self._prefetch_thread is not None:
-            return
-        # Initialize ready queue and transfer stream
-        self._ready2prefetch = Queue(maxsize=16)
-        self._stop_prefetch.clear()
-        self._prefetch_stream = torch.cuda.Stream() # type: ignore
+    def _start_prefetcher(self):
+        self._prefetch_queue: Queue = Queue(maxsize=16)
 
         def _prefetch_loop():
-            assert self._ready2prefetch is not None
-            self._prefetch_stream = torch.cuda.Stream()
-            while not self._stop_prefetch.is_set():
-                # If queue is full, wait a bit
-                if self._ready2prefetch.full():
-                    # Avoid busy wait
-                    self._stop_prefetch.wait(0.001)
-                    continue
+            prefetch_stream = torch.cuda.Stream()
+            while True:
                 # Try to fill GPU blocks as much as possible by scheduling
                 try:
                     seqs, is_prefill = self.scheduler.schedule()
@@ -103,90 +93,93 @@ class LLMEngine:
                     # No schedulable seqs at the moment
                     if self.scheduler.is_finished():
                         break
-                    self._stop_prefetch.wait(0.001)
+                    sleep(0.001)
                     continue
 
                 # Kick off H2D KV transfer if indexed
                 transfer_event = None
                 xfer_ms = 0.0
-                if self._prefetch_stream is not None:
-                    with record_function("get kv index"):
-                        ret = self.kv_cache_index.get_kv_cache(seqs, stream=self._prefetch_stream, return_timing=True, cancel_event=self._cancel_prefetch)
-                    # Wait for H2D completion before marking ready, to guarantee compute sees ready KV
-                    if self._cancel_prefetch.is_set():
-                        self._cancel_prefetch.clear()
+                with record_function("get kv index"):
+                    ret = self.kv_cache_index.get_kv_cache(
+                        seqs,
+                        stream=prefetch_stream,  # type: ignore
+                        return_timing=True,
+                        cancel_event=self._cancel_prefetch,
+                    )
 
-                    if ret is not None:
-                        if isinstance(ret, tuple):
-                            transfer_event, start_event = ret
-                        else:
-                            transfer_event, start_event = ret, None
-                        self._prefetch_stream.synchronize()
-                        if start_event is not None:
-                            xfer_ms = start_event.elapsed_time(transfer_event)
+                if self._cancel_prefetch.is_set():
+                    self._cancel_prefetch.clear()
+
+                if ret is not None:
+                    if isinstance(ret, tuple):
+                        transfer_event, start_event = ret
+                    else:
+                        transfer_event, start_event = ret, None
+                    transfer_event.synchronize()
+                    if start_event is not None:
+                        xfer_ms = start_event.elapsed_time(transfer_event)
                 # Enqueue ready batch for compute
-                self._ready2prefetch.put((seqs, is_prefill, xfer_ms))
-            # Signal termination with sentinel
-            try:
-                self._ready2prefetch.put_nowait(([], False, 0.0))
-            except Exception:
-                pass
+                self._prefetch_queue.put((seqs, is_prefill, xfer_ms))
 
-            self._prefetch_thread = None
             print(colored("prefetch thread quit!", "red"))
 
-        self._prefetch_thread = threading.Thread(target=_prefetch_loop, name="kv-prefetch", daemon=True)
+        self._prefetch_thread = threading.Thread(
+            target=_prefetch_loop, name="kv-prefetch", daemon=True
+        )
         self._prefetch_thread.start()
 
-    def _ensure_storer(self):
-        if self._store_thread is not None:
-            return
+    def _start_storer(self):
         # Initialize ready queue and transfer stream
-        self._ready2store = Queue(maxsize=-1)
-        self._stop_store.clear()
-        self._store_stream = torch.cuda.Stream() # type: ignore
+        self._store_queue = Queue(maxsize=-1)
 
         def _store_loop():
-            assert self._ready2store is not None
-            while not self._stop_store.is_set() or not self._ready2store.empty():
+            store_stream = torch.cuda.Stream()
+            while True:
                 # Kick off H2D KV transfer if indexed
                 transfer_event = None
-                seqs = self._ready2store.get()
-                if self._store_stream is not None:
-                    with record_function("store kv index"):
-                        ret = self.kv_cache_index.store_kv_cache(seqs, stream=self._store_stream, return_timing=False)
-                    if ret is not None:
-                        if isinstance(ret, tuple):
-                            transfer_event, start_event = ret
-                        else:
-                            transfer_event, start_event = ret, None
-                        transfer_event.synchronize()
+                seqs = self._store_queue.get()
+                if len(seqs) == 0:
+                    break
 
-                        if start_event is not None:
-                            print(f"store kv cache: {start_event.elapsed_time(transfer_event)}")
+                with record_function("store kv index"):
+                    ret = self.kv_cache_index.store_kv_cache(
+                        seqs, stream=store_stream, return_timing=False  # type: ignore
+                    )
 
-                    # deallocate blocks here
-                    for seq in seqs:
-                        # WARN: may cause conflict
-                        seq.lock_block = False
-                        self.scheduler.block_manager.deallocate(seq)
-            self._store_thread = None
+                if ret is not None:
+                    if isinstance(ret, tuple):
+                        transfer_event, start_event = ret
+                    else:
+                        transfer_event, start_event = ret, None
+                    transfer_event.synchronize()
+
+                    if start_event is not None:
+                        print(
+                            f"store kv cache: {start_event.elapsed_time(transfer_event)}"
+                        )
+
+                # deallocate blocks here
+                for seq in seqs:
+                    seq.lock_block = False
+                    self.scheduler.block_manager.deallocate(seq)
+
             print(colored("store thread quit!", "red"))
 
-        self._store_thread = threading.Thread(target=_store_loop, name="kv-prefetch", daemon=True)
+        self._store_thread = threading.Thread(
+            target=_store_loop, name="kv-prefetch", daemon=True
+        )
         self._store_thread.start()
 
     def step(self, use_index):
         xfer_ms = 0.0
         if use_index:
-            assert self._ready2prefetch is not None, "Prefetcher not initialized"
             # Pop a ready batch (blocks until available or sentinel)
             try:
-                item = self._ready2prefetch.get_nowait()
-                # item = self._ready2prefetch.get()
+                item = self._prefetch_queue.get_nowait()
+                # item = self._prefetch_queue.get()
             except Empty:
                 self._cancel_prefetch.set()
-                item = self._ready2prefetch.get()
+                item = self._prefetch_queue.get()
 
             # backward-compat if queue carries 2-tuple
             seqs, is_prefill, xfer_ms = item
@@ -207,7 +200,8 @@ class LLMEngine:
         if use_index:
             for seq in seqs:
                 seq.lock_block = True
-            self._ready2store.put_nowait(seqs) # type: ignore
+            assert(len(seqs) > 0 )
+            self._store_queue.put_nowait(seqs)  # type: ignore
 
         self.scheduler.postprocess(seqs, token_ids)
         # Stats and prints
@@ -215,8 +209,12 @@ class LLMEngine:
             self._stats["total_xfer_ms"] += xfer_ms
             self._stats["total_compute_ms"] += compute_ms
             self._stats["num_batches"] += 1
-            print(colored(f"H2D: {xfer_ms:.2f} ms | Compute: {compute_ms:.2f} ms", "cyan"))
-        outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
+            print(
+                colored(f"H2D: {xfer_ms:.2f} ms | Compute: {compute_ms:.2f} ms", "cyan")
+            )
+        outputs = [
+            (seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished
+        ]
         num_tokens = sum(len(seq) for seq in seqs) if is_prefill else -len(seqs)
         return outputs, num_tokens
 
@@ -240,13 +238,13 @@ class LLMEngine:
             self.add_request(prompt, sp)
         if use_index:
             # Start prefetch worker once requests are queued
-            self._ensure_prefetcher()
-            self._ensure_storer()
+            self._start_prefetcher()
+            self._start_storer()
         outputs = {}
-        prefill_throughput = decode_throughput = 0.
+        prefill_throughput = decode_throughput = 0.0
         end = time()
         print(f"init: {end - start}")
-        while not self.is_finished():
+        while not self.is_finished() or not self._prefetch_queue.empty():
             t = perf_counter()
             output, num_tokens = self.step(use_index)
             if use_tqdm:
@@ -254,26 +252,36 @@ class LLMEngine:
                     prefill_throughput = num_tokens / (perf_counter() - t)
                 else:
                     decode_throughput = -num_tokens / (perf_counter() - t)
-                pbar.set_postfix({ # type: ignore
-                    "Prefill": f"{int(prefill_throughput)}tok/s",
-                    "Decode": f"{int(decode_throughput)}tok/s",
-                })
+                pbar.set_postfix( # type: ignore
+                    {  # type: ignore
+                        "Prefill": f"{int(prefill_throughput)}tok/s",
+                        "Decode": f"{int(decode_throughput)}tok/s",
+                    }
+                )
             for seq_id, token_ids in output:
                 outputs[seq_id] = token_ids
                 if use_tqdm:
-                    pbar.update(1) # type: ignore
+                    pbar.update(1)  # type: ignore
         outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]
-        outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
+        outputs = [
+            {"text": self.tokenizer.decode(token_ids), "token_ids": token_ids}
+            for token_ids in outputs
+        ]
         if use_tqdm:
-            pbar.close() # type: ignore
+            pbar.close()  # type: ignore
         torch.cuda.synchronize()
-        if use_index and self._stats["num_batches"] > 0:
+        if use_index:
             total_xfer = self._stats["total_xfer_ms"]
             total_comp = self._stats["total_compute_ms"]
             nb = self._stats["num_batches"]
             avg_xfer = total_xfer / nb
             avg_comp = total_comp / nb
-            print(colored(f"\nTiming summary (per batch): H2D avg {avg_xfer:.2f} ms | Compute avg {avg_comp:.2f} ms | batches {nb}", "green"))
+            print(
+                colored(
+                    f"\nTiming summary (per batch): H2D avg {avg_xfer:.2f} ms | Compute avg {avg_comp:.2f} ms | batches {nb}",
+                    "green",
+                )
+            )
             self._stats = {
                 "total_xfer_ms": 0.0,
                 "total_compute_ms": 0.0,
@@ -281,11 +289,9 @@ class LLMEngine:
             }
             # join background threads
             if self._prefetch_thread is not None:
-                self._stop_prefetch.set()
                 self._prefetch_thread.join()
 
             if self._store_thread is not None:
-                self._stop_store.set()
-                self._ready2store.put_nowait([]) # type: ignore
+                self._store_queue.put_nowait([])  # type: ignore
                 self._store_thread.join()
         return outputs

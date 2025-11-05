@@ -25,25 +25,21 @@ class KVCacheIndex:
             # pin memory when init
             for id, kv_cache in list(self.kv_cache_index.items()):
                 if isinstance(kv_cache, torch.Tensor) and not kv_cache.is_pinned():
-                    pinned = torch.empty_like(kv_cache, pin_memory=True)
-                    pinned.copy_(kv_cache)
-                    self.kv_cache_index[id] = pinned
+                    self.kv_cache_index[id] = kv_cache.pin_memory()
 
     def store_kv_cache(
         self,
         seqs: list[Sequence],
-        stream: Optional[torch.cuda.Stream] = None,
+        stream: torch.cuda.Stream,
         return_timing: bool = False,
     ):
         _, num_layers, _, block_size, num_kv_heads, head_dim = self.gpu_kv_cache.shape
-        # Use provided stream (preferred) or current stream
-        s = stream if stream is not None else torch.cuda.current_stream()
-        with torch.cuda.stream(s):
+        with torch.cuda.stream(stream):
             start_event = (
                 torch.cuda.Event(enable_timing=True) if return_timing else None
             )
             if start_event is not None:
-                start_event.record(s)
+                start_event.record(stream)
             for seq in seqs:
                 if seq.text_id is None or seq.text_id in self.kv_cache_index:
                     # If already indexed, skip
@@ -91,7 +87,7 @@ class KVCacheIndex:
         # No global synchronize here; let transfers overlap with subsequent work
         if self.dirty:
             event = torch.cuda.Event(blocking=False, enable_timing=return_timing)
-            event.record(s)
+            event.record(stream)
             if return_timing and start_event is not None:
                 return event, start_event
             else:
@@ -103,7 +99,7 @@ class KVCacheIndex:
         self,
         seqs: list[Sequence],
         cancel_event: Event,
-        stream: Optional[torch.cuda.Stream] = None,
+        stream: torch.cuda.Stream,
         return_timing: bool = False,
     ):
         """
@@ -114,13 +110,12 @@ class KVCacheIndex:
         _, num_layers, _, block_size, _, _ = self.gpu_kv_cache.shape
         any_copied = False
         # Use provided stream (preferred) or current stream
-        s = stream if stream is not None else torch.cuda.current_stream()
-        with torch.cuda.stream(s):
+        with torch.cuda.stream(stream):
             start_event = (
                 torch.cuda.Event(enable_timing=True) if return_timing else None
             )
             if start_event is not None:
-                start_event.record(s)
+                start_event.record(stream)
             for seq in seqs:
                 if seq.text_id is None or seq.num_cached_tokens >= seq.text_token_len:
                     continue
@@ -166,7 +161,7 @@ class KVCacheIndex:
 
         if any_copied:
             event = torch.cuda.Event(blocking=False, enable_timing=return_timing)
-            event.record(s)
+            event.record(stream)
             if return_timing and start_event is not None:
                 return event, start_event
             else:

@@ -279,18 +279,15 @@ class ModelRunner:
             logits = self.run_model(input_ids, positions, is_prefill)
             if self.rank == 0:
                 tokens = self.sampler(logits, temperatures)  # GPU 张量
-                if tokens.is_cuda:
-                    if self._host_tokens is None or self._host_tokens.numel() != tokens.numel():
-                        self._host_tokens = torch.empty_like(tokens, device="cpu", pin_memory=True)
-                    compute_end = torch.cuda.Event()
-                    torch.cuda.current_stream().record_event(compute_end)
-                    with torch.cuda.stream(self.d2h_stream):
-                        self.d2h_stream.wait_event(compute_end)
-                        self._host_tokens.copy_(tokens, non_blocking=True)  # Device -> Pinned
-                    self.d2h_stream.synchronize()
-                    token_ids = self._host_tokens.tolist()
-                else:
-                    token_ids = tokens.tolist()
+                if self._host_tokens is None or self._host_tokens.numel() != tokens.numel():
+                    self._host_tokens = torch.empty_like(tokens, device="cpu", pin_memory=True)
+                compute_end = torch.cuda.Event()
+                torch.cuda.current_stream().record_event(compute_end)
+                with torch.cuda.stream(self.d2h_stream):
+                    self.d2h_stream.wait_event(compute_end)
+                    self._host_tokens.copy_(tokens, non_blocking=True)  # Device -> Pinned
+                self.d2h_stream.synchronize()
+                token_ids = self._host_tokens.tolist()
             else:
                 token_ids = None
         reset_context()
