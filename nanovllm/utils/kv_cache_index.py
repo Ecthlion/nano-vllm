@@ -13,7 +13,7 @@ class KVCacheIndex:
     def __init__(self, gpu_kv_cache, index_name="imdb_kvcache.pt") -> None:
         # Tensor[2, num_layers, num_blocks, block_size, num_kv_heads, head_dim]
         self.gpu_kv_cache = gpu_kv_cache
-        self.path = f"/data/zwt/{index_name}"
+        self.path = f"/data/zhangyuyun/{index_name}"
         self.dirty = False
         self.indexed = False
         # text_id -> kv_cache[2, num_layers, seq_len, num_kv_heads, head_dim]
