@@ -48,6 +48,7 @@ class Attention(nn.Module):
         head_dim,
         scale,
         num_kv_heads,
+        layer_id,
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -55,6 +56,7 @@ class Attention(nn.Module):
         self.scale = scale
         self.num_kv_heads = num_kv_heads
         self.k_cache = self.v_cache = torch.tensor([])
+        self.layer_id = layer_id
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
         context = get_context()
@@ -62,6 +64,42 @@ class Attention(nn.Module):
         if k_cache.numel() and v_cache.numel():
             store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)
         if context.is_prefill:
+            # TODO: pruning for layer 0
+            if self.layer_id == 0 and context.block_tables is None and context.cu_seqlens_q is not None and context.cu_seqlens_k is not None:
+                # Vectorized pruning index discovery on packed sequences.
+                group_size = self.num_heads // self.num_kv_heads
+                # q_gqa: [N, num_kv_heads, head_dim]
+                q_gqa = q.view(q.size(0), self.num_kv_heads, group_size, self.head_dim).mean(dim=2)
+
+                cuq = context.cu_seqlens_q  # [B+1]
+                cuk = context.cu_seqlens_k  # [B+1]
+                B = cuq.numel() - 1
+                last_q_idx = cuq[1:] - 1  # [B]
+                # Build sequence id per token in packed layout
+                lens_k = (cuk[1:] - cuk[:-1]).to(torch.long)  # [B]
+                seq_ids = torch.repeat_interleave(torch.arange(B, device=k.device), lens_k)
+
+                # Gather last q per token's sequence and compute similarity
+                q_last = q_gqa.index_select(0, last_q_idx)  # [B, num_kv_heads, head_dim]
+                q_last_per_token = q_last.index_select(0, seq_ids)  # [N, num_kv_heads, head_dim]
+                # sim per head, then mean over kv heads -> [N]
+                scores = (k * q_last_per_token).sum(dim=-1).mean(dim=-1)
+
+                alpha = 0.2
+                pruned = []
+                # Per-sequence topk on filtered scores
+                for i in range(B):
+                    s = int(cuk[i].item()); e = int(cuk[i+1].item())
+                    if e - s <= 1:
+                        continue
+                    seq_scores = scores[s:e]
+                    k_prune = max(int(alpha * (e - s)), 0)
+                    k_prune = min(k_prune, seq_scores.numel())
+                    if k_prune <= 0:
+                        continue
+                    _, idx = torch.topk(seq_scores, k=k_prune, largest=False, sorted=False)
+                    pruned.append((s + idx))
+
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache
             o = flash_attn_varlen_func(q, k, v,
