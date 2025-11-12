@@ -31,6 +31,8 @@ class ModelRunner:
 
         self.d2h_stream = torch.cuda.Stream()
         self._host_tokens = None
+        # Runtime flag (can be mutated externally by LLMEngine)
+        self.pruning_enabled = False
 
         dist.init_process_group("nccl", "tcp://localhost:2334", world_size=self.world_size, rank=rank)
         torch.cuda.set_device(rank)
@@ -164,7 +166,7 @@ class ModelRunner:
         for seq in seqs:
             seqlen = len(seq)
             input_ids.extend(seq[seq.num_cached_tokens:])
-            positions.extend(list(range(seq.num_cached_tokens, seqlen)))
+            positions.extend(list(range(seq.num_cached_tokens + seq.pruning_len, seqlen + seq.pruning_len)))
             seqlen_q = seqlen - seq.num_cached_tokens
             seqlen_k = seqlen
             cu_seqlens_q.append(cu_seqlens_q[-1] + seqlen_q)
@@ -199,7 +201,8 @@ class ModelRunner:
         cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
+        # Single context set call including pruning flags (indices discovered inside attention later)
+        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables, pruning_enabled=self.pruning_enabled)
         return input_ids, positions
 
     def prepare_decode(self, seqs: list[Sequence]):
@@ -272,7 +275,7 @@ class ModelRunner:
         future = self._logits_executor.submit(_worker, hidden)
         return future.result()
 
-    def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
+    def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int] | None:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         with record_function("forward"):
@@ -282,14 +285,20 @@ class ModelRunner:
                 if self._host_tokens is None or self._host_tokens.numel() != tokens.numel():
                     self._host_tokens = torch.empty_like(tokens, device="cpu", pin_memory=True)
                 compute_end = torch.cuda.Event()
-                torch.cuda.current_stream().record_event(compute_end)
-                with torch.cuda.stream(self.d2h_stream):
-                    self.d2h_stream.wait_event(compute_end)
+                torch.cuda.current_stream().record_event(compute_end)  # type: ignore
+                with torch.cuda.stream(self.d2h_stream):  # type: ignore
+                    self.d2h_stream.wait_event(compute_end)  # type: ignore
                     self._host_tokens.copy_(tokens, non_blocking=True)  # Device -> Pinned
                 self.d2h_stream.synchronize()
                 token_ids = self._host_tokens.tolist()
             else:
                 token_ids = None
+        # Capture pruning indices (if any) from context before resetting
+        ctx = get_context()
+        if is_prefill and ctx.pruning_enabled and ctx.pruned_local_indices is not None:
+            # Assign per-sequence pruning indices (local prompt positions)
+            for seq, local_idx in zip(seqs, ctx.pruned_local_indices):
+                seq.pruning_indices = local_idx.cpu().tolist()  # type: ignore[attr-defined]
         reset_context()
         return token_ids
 

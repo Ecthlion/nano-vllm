@@ -64,8 +64,14 @@ class Attention(nn.Module):
         if k_cache.numel() and v_cache.numel():
             store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)
         if context.is_prefill:
-            # TODO: pruning for layer 0
-            if self.layer_id == 0 and context.block_tables is None and context.cu_seqlens_q is not None and context.cu_seqlens_k is not None:
+            # Discover pruning indices on the first layer only, and only when enabled.
+            if (
+                self.layer_id == 0
+                and context.pruning_enabled
+                and context.block_tables is None
+                and context.cu_seqlens_q is not None
+                and context.cu_seqlens_k is not None
+            ):
                 # Vectorized pruning index discovery on packed sequences.
                 group_size = self.num_heads // self.num_kv_heads
                 # q_gqa: [N, num_kv_heads, head_dim]
@@ -86,19 +92,30 @@ class Attention(nn.Module):
                 scores = (k * q_last_per_token).sum(dim=-1).mean(dim=-1)
 
                 alpha = 0.2
-                pruned = []
+                pruned_locals: list[torch.Tensor] = []
+                num_pruned = 0
                 # Per-sequence topk on filtered scores
                 for i in range(B):
                     s = int(cuk[i].item()); e = int(cuk[i+1].item())
-                    if e - s <= 1:
+                    seqlen_i = e - s
+                    if seqlen_i <= 1:
+                        pruned_locals.append(torch.empty(0, dtype=torch.int64, device=k.device))
                         continue
                     seq_scores = scores[s:e]
-                    k_prune = max(int(alpha * (e - s)), 0)
+                    k_prune = max(int(alpha * seqlen_i), 0)
                     k_prune = min(k_prune, seq_scores.numel())
                     if k_prune <= 0:
+                        pruned_locals.append(torch.empty(0, dtype=torch.int64, device=k.device))
                         continue
                     _, idx = torch.topk(seq_scores, k=k_prune, largest=False, sorted=False)
-                    pruned.append((s + idx))
+                    num_pruned += len(idx)
+                    # store LOCAL indices within the sequence
+                    pruned_locals.append(idx)
+
+                print(f"[pruned] {num_pruned} tokens")
+
+                # Stash into global context for later stages (KV cache store/persist)
+                context.pruned_local_indices = pruned_locals
 
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache

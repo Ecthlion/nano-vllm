@@ -78,6 +78,16 @@ class LLMEngine:
             prompt = (prompt[0], self.tokenizer.encode(prompt[1]))
 
         seq = Sequence(prompt, sampling_params)  # type: ignore
+
+        # If persisted pruned text exists for this text_id, rebuild the prompt with pruned text
+        if isinstance(prompt, tuple):
+            text_id = prompt[0]
+            item = self.kv_cache_index.kv_cache_index.get(text_id)
+            if isinstance(item, dict):
+                seq.pruning_len = item.get("pruning_len")  # type: ignore
+                text_tokens_pruned = item.get("text_tokens_pruned")
+                seq.token_ids = text_tokens_pruned + seq.token_ids[seq.text_token_len:]  # type: ignore
+                seq.text_token_len -= seq.pruning_len
         self.scheduler.add(seq)
 
     def _start_prefetcher(self):
@@ -166,7 +176,7 @@ class LLMEngine:
             print(colored("store thread quit!", "red"))
 
         self._store_thread = threading.Thread(
-            target=_store_loop, name="kv-prefetch", daemon=True
+            target=_store_loop, name="kv-store", daemon=True
         )
         self._store_thread.start()
 
@@ -190,7 +200,6 @@ class LLMEngine:
             seqs, is_prefill = self.scheduler.schedule()
             print(colored(f"schedule {len(seqs)} seq", "magenta"))
 
-        # Measure compute GPU time via CUDA events
         start = time()
         with record_function("run model"):
             token_ids = self.model_runner.call("run", seqs, is_prefill)
@@ -227,9 +236,13 @@ class LLMEngine:
         sampling_params: SamplingParams | list[SamplingParams],
         use_tqdm: bool = True,
         use_index: bool = False,
+        pruning: bool = False,
     ) -> list[dict]:
         start = time()
         self.use_index = use_index
+        # Toggle pruning feature for this generation session
+        # Propagate to model runner so it can prepare the runtime context.
+        self.model_runner.pruning_enabled = pruning  # type: ignore[attr-defined]
         if use_tqdm:
             pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True)
         if not isinstance(sampling_params, list):

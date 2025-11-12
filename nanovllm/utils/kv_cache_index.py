@@ -16,16 +16,21 @@ class KVCacheIndex:
         self.path = f"/data/zwt/{index_name}"
         self.dirty = False
         self.indexed = False
-        # text_id -> kv_cache[2, num_layers, seq_len, num_kv_heads, head_dim]
+        # text_id -> {
+        #   "kv": Tensor[2, num_layers, seq_len_post_prune, num_kv_heads, head_dim],
+        #   "pruning_len": int,                       # number of pruned text tokens
+        #   "text_tokens_pruned": list[int] | None    # text tokens after pruning
+        # }
         self.kv_cache_index: dict = {}
         if os.path.isfile(self.path):
             self.kv_cache_index = torch.load(self.path)
             self.indexed = True
 
             # pin memory when init
-            for id, kv_cache in list(self.kv_cache_index.items()):
-                if isinstance(kv_cache, torch.Tensor) and not kv_cache.is_pinned():
-                    self.kv_cache_index[id] = kv_cache.pin_memory()
+            for _, item in list(self.kv_cache_index.items()):
+                kv = item.get("kv")
+                if isinstance(kv, torch.Tensor) and not kv.is_pinned():
+                    item["kv"] = kv.pin_memory()
 
     def store_kv_cache(
         self,
@@ -42,14 +47,17 @@ class KVCacheIndex:
                 start_event.record(stream)
             for seq in seqs:
                 if seq.text_id is None or seq.text_id in self.kv_cache_index:
-                    # If already indexed, skip
                     continue
 
-                # 1. allocate cpu kv cache
+                # Determine pruned indices (local prompt positions relative to text_token_len)
+                pruned = sorted(seq.pruning_indices)
+                # Allocate CPU cache for UNPRUNED tokens only
+                pruned = [i for i in pruned if i < seq.text_token_len]
+                post_prune_len = seq.text_token_len - len(pruned)
                 cpu_kv_cache = torch.empty(
                     2,
                     num_layers,
-                    seq.text_token_len,
+                    post_prune_len,
                     num_kv_heads,
                     head_dim,
                     device="cpu",
@@ -57,33 +65,51 @@ class KVCacheIndex:
                     pin_memory=True,
                 )
 
-                # 2. gpu_kv_cache -> cpu_kv_cache
+                # Build flattened slot list for the first text_token_len tokens
+                token_slots: list[int] = []
+                taken = 0
+                for block_id in seq.block_table:
+                    if taken >= seq.text_token_len:
+                        break
+                    # tokens available to take from this block
+                    cnt = min(block_size, seq.text_token_len - taken)
+                    base = block_id * block_size
+                    token_slots.extend(range(base, base + cnt))
+                    taken += cnt
+
+                if len(token_slots) != seq.text_token_len:
+                    # Fallback guard: lengths must match; otherwise skip indexing
+                    token_slots = token_slots[: seq.text_token_len]
+
+                # Filter out pruned positions to get kept slot ids
+                if pruned:
+                    kept_slots = [slot for i, slot in enumerate(token_slots) if i not in pruned]
+                else:
+                    kept_slots = token_slots
+
+                keep_len = len(kept_slots)
+                # Compute pruned text token ids (final pruned state)
+                kept_local_indices = [i for i in range(seq.text_token_len) if i not in pruned]
+                text_tokens_pruned = [seq.token_ids[i] for i in kept_local_indices]
+
+                assert keep_len != 0
+
+                kept_slots_tensor = torch.tensor(kept_slots, dtype=torch.int64, device=self.gpu_kv_cache.device)
+                # Vectorized gather per (kv, layer), then one D2H copy per pair
+                flat_blocks = self.gpu_kv_cache.shape[2] * block_size
                 for kv_idx in range(2):
                     for layer_idx in range(num_layers):
-                        token_offset = 0  # reset for each layer
-                        for block_id in seq.block_table:
-                            remaining = seq.text_token_len - token_offset
-                            if remaining <= 0:
-                                break
-                            block_tokens = (
-                                remaining if remaining < block_size else block_size
-                            )
-
-                            dst = cpu_kv_cache[
-                                kv_idx,
-                                layer_idx,
-                                token_offset : token_offset + block_tokens,
-                            ]
-                            src = self.gpu_kv_cache[
-                                kv_idx, layer_idx, block_id, :block_tokens
-                            ]
-                            # Async D2H copy. Pinned dst enables non_blocking behavior.
-                            dst.copy_(src, non_blocking=True)
-
-                            token_offset += block_tokens
+                        src_flat = self.gpu_kv_cache[kv_idx, layer_idx].reshape(flat_blocks, num_kv_heads, head_dim)
+                        selected = src_flat.index_select(0, kept_slots_tensor)
+                        dst = cpu_kv_cache[kv_idx, layer_idx, :keep_len]
+                        dst.copy_(selected, non_blocking=True)
 
                 self.dirty = True
-                self.kv_cache_index[seq.text_id] = cpu_kv_cache
+                self.kv_cache_index[seq.text_id] = {
+                    "kv": cpu_kv_cache,
+                    "pruning_len": len(pruned),
+                    "text_tokens_pruned": text_tokens_pruned,
+                }
         # No global synchronize here; let transfers overlap with subsequent work
         if self.dirty:
             event = torch.cuda.Event(blocking=False, enable_timing=return_timing)
@@ -119,9 +145,11 @@ class KVCacheIndex:
             for seq in seqs:
                 if seq.text_id is None or seq.num_cached_tokens >= seq.text_token_len:
                     continue
-                cpu_kv_cache = self.kv_cache_index.get(seq.text_id)
-                if cpu_kv_cache is None:
+                item = self.kv_cache_index.get(seq.text_id)
+                if item is None:
                     continue
+                # Support legacy tensor or new dict format
+                cpu_kv_cache = item.get("kv")
 
                 # Only copy tokens that aren't already cached (full blocks only)
                 start_token = seq.num_cached_tokens
@@ -173,7 +201,6 @@ class KVCacheIndex:
         return seq.text_id and seq.text_id in self.kv_cache_index
 
     def persistence(self):
-        # TODO: pruning kv cache
         if self.dirty:
             torch.save(self.kv_cache_index, self.path)
         self.dirty = False

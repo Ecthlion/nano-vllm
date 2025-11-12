@@ -35,9 +35,12 @@ class Sequence:
         self.max_tokens = sampling_params.max_tokens
         self.ignore_eos = sampling_params.ignore_eos
         self.text_token_len = self.num_prompt_tokens - sampling_params.base_token_len
+        # Pruning related fields
+        self.pruning_indices = []  # local indices within prompt to prune (not applied yet)
+        self.pruning_len = 0
 
     def __len__(self):
-        return self.num_tokens
+        return len(self.token_ids)
 
     def __getitem__(self, key):
         return self.token_ids[key]
@@ -52,11 +55,11 @@ class Sequence:
 
     @property
     def prompt_token_ids(self):
-        return self.token_ids[:self.num_prompt_tokens]
+        return self.token_ids[:self.num_prompt_tokens-self.pruning_len]
 
     @property
     def completion_token_ids(self):
-        return self.token_ids[self.num_prompt_tokens:]
+        return self.token_ids[self.num_prompt_tokens-self.pruning_len:]
 
     @property
     def num_cached_blocks(self):
@@ -64,11 +67,11 @@ class Sequence:
 
     @property
     def num_blocks(self):
-        return (self.num_tokens + self.block_size - 1) // self.block_size
+        return (self.num_tokens - self.pruning_len + self.block_size - 1) // self.block_size
 
     @property
     def last_block_num_tokens(self):
-        return self.num_tokens - (self.num_blocks - 1) * self.block_size
+        return self.num_tokens - self.pruning_len - (self.num_blocks - 1) * self.block_size
 
     def block(self, i):
         assert 0 <= i < self.num_blocks
