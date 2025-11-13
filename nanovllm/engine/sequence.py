@@ -15,7 +15,7 @@ class Sequence:
     block_size = 256
     counter = count()
 
-    def __init__(self, token_ids: list[int], sampling_params = SamplingParams()):
+    def __init__(self, token_ids: list[int], sampling_params = SamplingParams(), task_start=None):
         self.seq_id = next(Sequence.counter)
         self.status = SequenceStatus.WAITING
         self.token_ids = copy(token_ids)
@@ -27,6 +27,12 @@ class Sequence:
         self.temperature = sampling_params.temperature
         self.max_tokens = sampling_params.max_tokens
         self.ignore_eos = sampling_params.ignore_eos
+        
+        if task_start is None or task_start > len(token_ids):
+            task_start = len(token_ids)
+        self.task_start = task_start
+        self.data_range = (0, task_start)
+        self.task_range = (task_start, len(token_ids))
 
     def __len__(self):
         return self.num_tokens

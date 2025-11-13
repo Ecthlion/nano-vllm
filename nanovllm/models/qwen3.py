@@ -10,10 +10,6 @@ from nanovllm.layers.linear import QKVParallelLinear, MergedColumnParallelLinear
 from nanovllm.layers.rotary_embedding import get_rope
 from nanovllm.layers.embed_head import VocabParallelEmbedding, ParallelLMHead
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-
 class Qwen3Attention(nn.Module):
 
     def __init__(
@@ -73,6 +69,7 @@ class Qwen3Attention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
+        token_types: torch.Tensor | None = None,
     ) -> torch.Tensor:
         qkv = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
@@ -80,10 +77,9 @@ class Qwen3Attention(nn.Module):
         k = self.k_norm(k.view(-1, self.num_kv_heads, self.head_dim))
         v = v.view(-1, self.num_kv_heads, self.head_dim)
         q, k = self.rotary_emb(positions, q, k)
-        o = self.attn(q, k, v)
+        o = self.attn(q, k, v, token_types)
         output = self.o_proj(o.flatten(1, -1))
         return output
-
 
 class Qwen3MLP(nn.Module):
 
@@ -112,7 +108,6 @@ class Qwen3MLP(nn.Module):
         x = self.act_fn(gate_up)
         x = self.down_proj(x)
         return x
-
 
 class Qwen3DecoderLayer(nn.Module):
 
@@ -145,16 +140,18 @@ class Qwen3DecoderLayer(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         residual: torch.Tensor | None,
+        token_types: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if residual is None:
             hidden_states, residual = self.input_layernorm(hidden_states), hidden_states
         else:
             hidden_states, residual = self.input_layernorm(hidden_states, residual)
-        hidden_states = self.self_attn(positions, hidden_states)
+            
+        hidden_states = self.self_attn(positions, hidden_states, token_types)
+        
         hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
-
 
 class Qwen3Model(nn.Module):
 
@@ -167,62 +164,20 @@ class Qwen3Model(nn.Module):
         self.layers = nn.ModuleList([Qwen3DecoderLayer(config) for _ in range(config.num_hidden_layers)])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-    def view(self, data):
-        fig, ax = plt.subplots(figsize=(12, 8))
-
-        # 使用seaborn绘制热力图
-        heatmap = sns.heatmap(
-            data,
-            cmap="RdBu_r",  # 红蓝渐变色，适合显示正负值
-            center=0,  # 以0为中心
-            ax=ax,
-            cbar_kws={"label": "Activation Value"},
-        )
-
-        # 设置标签
-        ax.set_xlabel("Hidden Dimension", fontsize=12)
-        ax.set_ylabel("Layer Idx", fontsize=12)
-
-        title = f"Heatmap of Hidden State"
-        ax.set_title(title, fontsize=14, pad=20)
-
-        # 如果token数量很多，可以适当减少刻度显示
-        if data.shape[0] > 50:
-            ax.set_yticks(np.linspace(0, data.shape[0], 10, dtype=int))
-        if data.shape[1] > 50:
-            ax.set_xticks(np.linspace(0, data.shape[1], 10, dtype=int))
-
-        plt.tight_layout()
-        plt.savefig(f"./graph/hidden_states.png")
-        plt.close()
-
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
+        token_types: torch.Tensor | None = None,
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
         residual = None
         
-        # last_rows = []
-        # count = 0
         for layer in self.layers:
-            # if count >= 6 and count <= 30 and count % 2 == 1:
-            #     continue
-
-            hidden_states, residual = layer(positions, hidden_states, residual)
-            # last_rows.append(hidden_states[-1, :])
-            #
-            # count += 1
-
-            # if count == 30:
-            #     break
-        # last_rows = torch.stack(last_rows)
-        # self.view(last_rows.float().cpu().numpy())
+            hidden_states, residual = layer(positions, hidden_states, residual, token_types)
 
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
-
 
 class Qwen3ForCausalLM(nn.Module):
     packed_modules_mapping = {
@@ -247,8 +202,9 @@ class Qwen3ForCausalLM(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
+        token_types: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        return self.model(input_ids, positions)
+        return self.model(input_ids, positions, token_types)
 
     def compute_logits(
         self,

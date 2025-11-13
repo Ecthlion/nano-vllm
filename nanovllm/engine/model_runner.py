@@ -19,12 +19,12 @@ class ModelRunner:
         hf_config = config.hf_config
         self.block_size = config.kvcache_block_size
         self.enforce_eager = config.enforce_eager
-        self.world_size = config.tensor_parallel_size
+        self.world_size = 1
         self.rank = rank
         self.event = event
 
         dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
-        torch.cuda.set_device(rank)
+        torch.cuda.set_device(2)
         default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(hf_config.torch_dtype)
         torch.set_default_device("cuda")
@@ -125,6 +125,7 @@ class ModelRunner:
     def prepare_prefill(self, seqs: list[Sequence]):
         input_ids = []
         positions = []
+        token_types = []
         cu_seqlens_q = [0]
         cu_seqlens_k = [0]
         max_seqlen_q = 0
@@ -133,6 +134,8 @@ class ModelRunner:
         block_tables = None
         for seq in seqs:
             seqlen = len(seq)
+            start_q = seq.num_cached_tokens
+            end_q = seqlen
             input_ids.extend(seq[seq.num_cached_tokens:])
             positions.extend(list(range(seq.num_cached_tokens, seqlen)))
             seqlen_q = seqlen - seq.num_cached_tokens
@@ -141,6 +144,13 @@ class ModelRunner:
             cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
             max_seqlen_q = max(seqlen_q, max_seqlen_q)
             max_seqlen_k = max(seqlen_k, max_seqlen_k)
+            
+            # token type 构建
+            # 0 = data, 1 = task
+            data_len = seq.task_start
+            for pos in range(start_q, end_q):
+                token_types.append(0 if pos < data_len else 1)
+                
             if not seq.block_table:    # warmup
                 continue
             for i in range(seq.num_cached_blocks, seq.num_blocks):
@@ -154,11 +164,12 @@ class ModelRunner:
             block_tables = self.prepare_block_tables(seqs)
         input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
         positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+        token_types = torch.tensor(token_types, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
-        return input_ids, positions
+        return input_ids, positions, token_types
 
     def prepare_decode(self, seqs: list[Sequence]):
         input_ids = []
@@ -186,9 +197,9 @@ class ModelRunner:
         return temperatures
 
     @torch.inference_mode()
-    def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
+    def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool, token_types: torch.Tensor | None = None):
         if is_prefill or self.enforce_eager or input_ids.size(0) > 512:
-            return self.model.compute_logits(self.model(input_ids, positions))
+            return self.model.compute_logits(self.model(input_ids, positions, token_types))
         else:
             bs = input_ids.size(0)
             context = get_context()
@@ -205,9 +216,13 @@ class ModelRunner:
             return self.model.compute_logits(graph_vars["outputs"][:bs])
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
-        input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
+        if is_prefill:
+            input_ids, positions, token_types = self.prepare_prefill(seqs)
+        else:
+            input_ids, positions = self.prepare_decode(seqs)
+            token_types = None
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
-        logits = self.run_model(input_ids, positions, is_prefill)
+        logits = self.run_model(input_ids, positions, is_prefill, token_types)
         token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
         reset_context()
         return token_ids

@@ -47,8 +47,13 @@ class ImdbDataset:
                 # base_prompt = f"Given the above film review, answer whether it contains names. Respond ONLY with \"yes\" or \"no\", in all lower case.\n"
                 # base_prompt = f"Given the above film review, answer whether it contains violent elements. Respond ONLY with \"yes\" or \"no\", in all lower case.\n"
                 prompt = f"{texts}\n{base_prompt}"
+                data_len = len(tokenizer(texts).input_ids)
                 prompt_len = len(tokenizer(prompt).input_ids)
-                samples.append(prompt)
+                samples.append({
+                    "text": prompt,
+                    "task_start": data_len,  # task 从 data_len 开始
+                    "prompt_len": prompt_len
+                })
         return samples
 
 

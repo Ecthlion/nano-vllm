@@ -1,4 +1,5 @@
 import atexit
+import copy
 from dataclasses import fields
 from time import perf_counter
 from tqdm.auto import tqdm
@@ -39,10 +40,22 @@ class LLMEngine:
         for p in self.ps:
             p.join()
 
-    def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):
-        if isinstance(prompt, str):
-            prompt = self.tokenizer.encode(prompt)
-        seq = Sequence(prompt, sampling_params)
+    def add_request(self, prompt: str | list[int] | dict, sampling_params: SamplingParams):
+        if isinstance(prompt, dict):
+            text = prompt.get("text")
+            task_start = prompt.get("task_start", None)
+        else:
+            text = prompt
+            task_start = None
+
+        if isinstance(text, str):
+            token_ids = self.tokenizer.encode(text)
+        elif isinstance(text, list):
+            token_ids = copy(text)
+        else:
+            raise TypeError(f"Unsupported prompt type: {type(text)}")
+
+        seq = Sequence(token_ids, sampling_params, task_start=task_start)
         self.scheduler.add(seq)
 
     def step(self):
@@ -58,16 +71,20 @@ class LLMEngine:
 
     def generate(
         self,
-        prompts: list[str] | list[list[int]],
+        prompts: list[str | dict],
         sampling_params: SamplingParams | list[SamplingParams],
         use_tqdm: bool = True,
     ) -> list[dict]:
         if use_tqdm:
             pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True)
-        if not isinstance(sampling_params, list):
-            sampling_params = [sampling_params] * len(prompts)
-        for prompt, sp in zip(prompts, sampling_params):
-            self.add_request(prompt, sp)
+            if not isinstance(sampling_params, list):
+                sampling_params = [sampling_params] * len(prompts)
+
+            for prompt, sp in zip(prompts, sampling_params):
+                self.add_request(prompt, sp)
+                if use_tqdm:
+                    pbar.update(0)
+                    
         outputs = {}
         prefill_throughput = decode_throughput = 0.
         while not self.is_finished():
