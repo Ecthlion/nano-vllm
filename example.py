@@ -30,7 +30,6 @@ class ImdbDataset:
 
     def sample(
         self,
-        tokenizer,
         base_prompt,
         num_input_lines=1000,
     ) -> tuple[list[tuple[int, str]], int]:
@@ -40,7 +39,7 @@ class ImdbDataset:
         duplicate = 1
         samples = []
         num_requests = int(num_input_lines / lines_per_prompt)
-        base_token_len = len(tokenizer(base_prompt).input_ids)
+        task_str_len = len(base_prompt)
 
         for i in range(num_requests):
             texts = "\n".join(
@@ -53,13 +52,12 @@ class ImdbDataset:
                 # base_prompt = f"Given the above film review, answer whether it contains violent elements. Respond ONLY with \"yes\" or \"no\", in all lower case.\n"
                 prompt = f"{texts}\n{base_prompt}"
                 samples.append((i, prompt))
-        return samples, base_token_len
+        return samples, task_str_len
 
 
 def main():
     # Init
     path = os.path.expanduser("/data/zwt/model/models/Qwen/Qwen3-8B/")
-    tokenizer = AutoTokenizer.from_pretrained(path)
     llm = LLM(path, enforce_eager=False, tensor_parallel_size=1)
     max_output_len = 1
     num_input_lines = 1000
@@ -73,9 +71,9 @@ def main():
 
     print(colored("\nBuild index / Warm up", "yellow"))
     base_prompt = " "
-    base_prompt = f'Given the above film review, answer whether the sentiment is "positive" or "negative". Respond ONLY with "positive" or "negative", in all lower case.\n'
-    samples, base_token_len = dataset.sample(tokenizer, base_prompt, num_warmup)
-    sampling_params.base_token_len = base_token_len
+    # base_prompt = f'Given the above film review, answer whether the sentiment is "positive" or "negative". Respond ONLY with "positive" or "negative", in all lower case.\n'
+    samples, tast_str_len = dataset.sample(base_prompt, num_warmup)
+    sampling_params.task_str_len = tast_str_len
 
     with profile(
         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -96,7 +94,7 @@ def main():
     # print(colored("Task1: suitable for kids", "yellow"))
     #
     # base_prompt = f'Given the above film review, answer whether the film is suitable for kids. Respond ONLY with "yes" or "no", in all lower case.\n'
-    # samples, base_token_len = dataset.sample(tokenizer, base_prompt, 20)
+    # samples, base_token_len = dataset.sample(base_prompt, 20)
     # sampling_params.base_token_len = base_token_len
     #
     # # The first task will generate kv cache index for texts
@@ -118,8 +116,8 @@ def main():
     ###################################################################
     print(colored("\nTask2: sentiment", "yellow"))
     base_prompt = f'Given the above film review, answer whether the sentiment is "positive" or "negative". Respond ONLY with "positive" or "negative", in all lower case.\n'
-    samples, base_token_len = dataset.sample(tokenizer, base_prompt, num_input_lines)
-    sampling_params.base_token_len = base_token_len
+    samples, tast_str_len = dataset.sample(base_prompt, num_input_lines)
+    sampling_params.task_str_len = tast_str_len
 
     with profile(
         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -143,7 +141,17 @@ def main():
     print(f"Task 2 Accuracy:{accuracy}\n")
 
     # print(data[data["suitable"] != generated]["review"])
+    # TODO: restrict output token ids
+    print("--- Checking for Incorrect and Invalid Results ---")
+    mismatched_count = 0
+    for i, (gen_text, true_label) in enumerate(zip(generated, data["sentiment"])):
+        if gen_text.lower() not in ["positive", "negative"]:
+            print(f"Index {i}: Invalid output. Generated: '{gen_text}', Expected: '{true_label}'")
+            mismatched_count += 1
 
+    if mismatched_count == 0:
+        print("No incorrect or invalid results found.")
+    print("--- End of Check ---\n")
 
 if __name__ == "__main__":
     main()

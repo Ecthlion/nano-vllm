@@ -72,22 +72,22 @@ class LLMEngine:
     def add_request(
         self, prompt: str | list[int] | tuple[int, str], sampling_params: SamplingParams
     ):
+        pruning_len = 0
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
         elif isinstance(prompt, tuple):
-            prompt = (prompt[0], self.tokenizer.encode(prompt[1]))
-
-        seq = Sequence(prompt, sampling_params)  # type: ignore
-
-        # If persisted pruned text exists for this text_id, rebuild the prompt with pruned text
-        if isinstance(prompt, tuple):
             text_id = prompt[0]
             item = self.kv_cache_index.kv_cache_index.get(text_id)
             if isinstance(item, dict):
-                seq.pruning_len = item.get("pruning_len")  # type: ignore
-                text_tokens_pruned = item.get("text_tokens_pruned")
-                seq.token_ids = text_tokens_pruned + seq.token_ids[seq.text_token_len:]  # type: ignore
-                seq.text_token_len -= seq.pruning_len
+                # remove text decode time
+                text_token_ids = item.get("text_tokens_pruned")
+                pruning_len = item.get("pruning_len")  # type: ignore
+            else:
+                text_token_ids = self.tokenizer.encode(prompt[1][:len(prompt[1])-sampling_params.task_str_len])
+            task_token_ids = self.tokenizer.encode(prompt[1][-sampling_params.task_str_len:])
+            prompt = (text_id, text_token_ids + task_token_ids)
+
+        seq = Sequence(prompt, len(text_token_ids), pruning_len, sampling_params)  # type: ignore
         self.scheduler.add(seq)
 
     def _start_prefetcher(self):
@@ -185,8 +185,8 @@ class LLMEngine:
         if use_index:
             # Pop a ready batch (blocks until available or sentinel)
             try:
-                item = self._prefetch_queue.get_nowait()
-                # item = self._prefetch_queue.get()
+                # item = self._prefetch_queue.get_nowait()
+                item = self._prefetch_queue.get()
             except Empty:
                 self._cancel_prefetch.set()
                 item = self._prefetch_queue.get()

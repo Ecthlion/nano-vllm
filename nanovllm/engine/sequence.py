@@ -15,7 +15,7 @@ class Sequence:
     block_size = 256
     counter = count()
 
-    def __init__(self, token_ids: list[int] | tuple[int, list[int]], sampling_params = SamplingParams()):
+    def __init__(self, token_ids: list[int] | tuple[int, list[int]], text_token_len = 0, pruning_len = 0 , sampling_params = SamplingParams()):
         self.seq_id = next(Sequence.counter)
         self.status = SequenceStatus.WAITING
         if isinstance(token_ids, tuple):
@@ -34,10 +34,10 @@ class Sequence:
         self.temperature = sampling_params.temperature
         self.max_tokens = sampling_params.max_tokens
         self.ignore_eos = sampling_params.ignore_eos
-        self.text_token_len = self.num_prompt_tokens - sampling_params.base_token_len
+        self.text_token_len = text_token_len
         # Pruning related fields
         self.pruning_indices = []  # local indices within prompt to prune (not applied yet)
-        self.pruning_len = 0
+        self.pruning_len = pruning_len
 
     def __len__(self):
         return len(self.token_ids)
@@ -55,11 +55,11 @@ class Sequence:
 
     @property
     def prompt_token_ids(self):
-        return self.token_ids[:self.num_prompt_tokens-self.pruning_len]
+        return self.token_ids[:self.num_prompt_tokens]
 
     @property
     def completion_token_ids(self):
-        return self.token_ids[self.num_prompt_tokens-self.pruning_len:]
+        return self.token_ids[self.num_prompt_tokens:]
 
     @property
     def num_cached_blocks(self):
@@ -67,11 +67,11 @@ class Sequence:
 
     @property
     def num_blocks(self):
-        return (self.num_tokens - self.pruning_len + self.block_size - 1) // self.block_size
+        return (self.num_tokens + self.block_size - 1) // self.block_size
 
     @property
     def last_block_num_tokens(self):
-        return self.num_tokens - self.pruning_len - (self.num_blocks - 1) * self.block_size
+        return self.num_tokens - (self.num_blocks - 1) * self.block_size
 
     def block(self, i):
         assert 0 <= i < self.num_blocks

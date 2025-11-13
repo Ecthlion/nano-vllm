@@ -66,7 +66,7 @@ class Attention(nn.Module):
         if context.is_prefill:
             # Discover pruning indices on the first layer only, and only when enabled.
             if (
-                self.layer_id == 0
+                self.layer_id == 35
                 and context.pruning_enabled
                 and context.block_tables is None
                 and context.cu_seqlens_q is not None
@@ -91,7 +91,7 @@ class Attention(nn.Module):
                 # sim per head, then mean over kv heads -> [N]
                 scores = (k * q_last_per_token).sum(dim=-1).mean(dim=-1)
 
-                alpha = 0.2
+                alpha = 0.9
                 pruned_locals: list[torch.Tensor] = []
                 num_pruned = 0
                 # Per-sequence topk on filtered scores
