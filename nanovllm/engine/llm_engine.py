@@ -72,26 +72,30 @@ class LLMEngine:
     def add_request(
         self, prompt: str | list[int] | tuple[int, str], sampling_params: SamplingParams
     ):
+        text_token_ids = []
         pruning_len = 0
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
         elif isinstance(prompt, tuple):
-            text_id = prompt[0]
-            item = self.kv_cache_index.kv_cache_index.get(text_id)
-            if isinstance(item, dict):
-                # remove text decode time
-                text_token_ids = item.get("text_tokens_pruned")
-                pruning_len = item.get("pruning_len")  # type: ignore
+            if self.use_index:
+                text_id = prompt[0]
+                item = self.kv_cache_index.kv_cache_index.get(text_id)
+                if isinstance(item, dict):
+                    # remove text decode time
+                    text_token_ids = item.get("text_tokens_pruned")
+                    pruning_len = item.get("pruning_len")  # type: ignore
+                else:
+                    text_token_ids = self.tokenizer.encode(prompt[1][:len(prompt[1])-sampling_params.task_str_len])
+                task_token_ids = self.tokenizer.encode(prompt[1][-sampling_params.task_str_len:])
+                prompt = (text_id, text_token_ids + task_token_ids)
             else:
-                text_token_ids = self.tokenizer.encode(prompt[1][:len(prompt[1])-sampling_params.task_str_len])
-            task_token_ids = self.tokenizer.encode(prompt[1][-sampling_params.task_str_len:])
-            prompt = (text_id, text_token_ids + task_token_ids)
+                prompt = (prompt[0], self.tokenizer.encode(prompt[1]))
 
         seq = Sequence(prompt, len(text_token_ids), pruning_len, sampling_params)  # type: ignore
         self.scheduler.add(seq)
 
     def _start_prefetcher(self):
-        self._prefetch_queue: Queue = Queue(maxsize=16)
+        self._prefetch_queue: Queue = Queue(maxsize=8)
 
         def _prefetch_loop():
             prefetch_stream = torch.cuda.Stream()
@@ -257,7 +261,7 @@ class LLMEngine:
         prefill_throughput = decode_throughput = 0.0
         end = time()
         print(f"init: {end - start}")
-        while not self.is_finished() or not self._prefetch_queue.empty():
+        while not self.is_finished() or (self.use_index and not self._prefetch_queue.empty()):
             t = perf_counter()
             output, num_tokens = self.step(use_index)
             if use_tqdm:
