@@ -131,6 +131,7 @@ class ModelRunner:
         max_seqlen_q = 0
         max_seqlen_k = 0
         slot_mapping = []
+        cu_seqlens_task_q = [0]
         block_tables = None
         for seq in seqs:
             seqlen = len(seq)
@@ -148,8 +149,17 @@ class ModelRunner:
             # token type 构建
             # 0 = data, 1 = task
             data_len = seq.task_start
+            task_len = 0
             for pos in range(start_q, end_q):
-                token_types.append(0 if pos < data_len else 1)
+                if pos < data_len:
+                    token_types.append(0)
+                else:
+                    token_types.append(1)
+                    task_len += 1
+
+            # 记录每条序列 task token 长度
+            if task_len > 0:
+                cu_seqlens_task_q.append(cu_seqlens_task_q[-1] + task_len)
                 
             if not seq.block_table:    # warmup
                 continue
@@ -167,8 +177,9 @@ class ModelRunner:
         token_types = torch.tensor(token_types, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+        cu_seqlens_task_q = torch.tensor(cu_seqlens_task_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
+        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, cu_seqlens_task_q, block_tables)
         return input_ids, positions, token_types
 
     def prepare_decode(self, seqs: list[Sequence]):

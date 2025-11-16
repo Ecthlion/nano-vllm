@@ -1,3 +1,4 @@
+import time
 import torch
 from torch import nn
 import triton
@@ -52,70 +53,55 @@ class Attention(nn.Module):
         self.scale = scale
         self.num_kv_heads = num_kv_heads
         self.k_cache = self.v_cache = torch.tensor([])
+        self.head_to_kv = torch.arange(num_heads) % num_kv_heads
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, token_types: torch.Tensor | None = None):
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, token_types: torch.Tensor | None = None, previous_q_ready=None):
         context = get_context()
         k_cache, v_cache = self.k_cache, self.v_cache
         if k_cache.numel() and v_cache.numel():
             store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)
             
         if context.is_prefill:
-            if token_types is not None and context.cu_seqlens_q is not None:
-                o = self.optimized_attention(q, k, v, token_types, context)
+            # 在prefill阶段使用优化的注意力计算
+            if token_types is not None and context.cu_seqlens_q is not None and previous_q_ready is not None:
+                
+                # 跳过data token
+                # torch.cuda.synchronize()
+                # start_time = time.perf_counter()
+                task_mask = token_types == 1
+                task_q = q[task_mask]        
+                if task_mask.any():
+                    task_output = flash_attn_varlen_func(
+                        task_q, 
+                        k, 
+                        v, 
+                        cu_seqlens_q=context.cu_seqlens_taskq,
+                        cu_seqlens_k=context.cu_seqlens_k,
+                        max_seqlen_q=task_q.shape[0],
+                        max_seqlen_k=k.shape[0],
+                        softmax_scale=self.scale,
+                        causal=True
+                    )
+                    previous_q_ready[task_mask] = task_output
+                o = previous_q_ready
+                # torch.cuda.synchronize()
+                # end_time = time.perf_counter()
+                # print(f"优化分支时间: {(end_time - start_time)*1000:.2f}ms")
             else:
+                # 回退到原始实现
                 if context.block_tables is not None:    # prefix cache
                     k, v = k_cache, v_cache
+                # torch.cuda.synchronize()
+                # start_time = time.perf_counter()
                 o = flash_attn_varlen_func(q, k, v,
-                                           max_seqlen_q=context.max_seqlen_q, cu_seqlens_q=context.cu_seqlens_q,
-                                           max_seqlen_k=context.max_seqlen_k, cu_seqlens_k=context.cu_seqlens_k,
-                                           softmax_scale=self.scale, causal=True, block_table=context.block_tables)
+                                        max_seqlen_q=context.max_seqlen_q, cu_seqlens_q=context.cu_seqlens_q,
+                                        max_seqlen_k=context.max_seqlen_k, cu_seqlens_k=context.cu_seqlens_k,
+                                        softmax_scale=self.scale, causal=True, block_table=context.block_tables)
+                # torch.cuda.synchronize()
+                # end_time = time.perf_counter()
+                # print(f"标准分支时间: {(end_time - start_time)*1000:.2f}ms")
         else:    # decode
             o = flash_attn_with_kvcache(q.unsqueeze(1), k_cache, v_cache,
                                         cache_seqlens=context.context_lens, block_table=context.block_tables, 
                                         softmax_scale=self.scale, causal=True)
         return o
-
-    def optimized_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, 
-                            token_types: torch.Tensor, context):
-        
-        data_mask = token_types == 0
-        task_mask = token_types == 1
-        
-        output = torch.zeros_like(q)
-        if data_mask.any():
-            if v.shape[1] != q.shape[1]:
-                repeat_factor = q.shape[1] // v.shape[1]
-                v_expanded = v.repeat_interleave(repeat_factor, dim=1)
-            else:
-                v_expanded = v
-            output[data_mask] = v_expanded[data_mask]
-        
-        if task_mask.any():
-            task_output = self.compute_task_attention(
-                q[task_mask], k, v
-            )
-            output[task_mask] = task_output
-        
-        return output
-
-    def compute_task_attention(self, task_q: torch.Tensor, all_k: torch.Tensor, all_v: torch.Tensor):   
-        num_tasks = task_q.shape[0]
-        total_tokens = all_k.shape[0]
-        
-        cu_seqlens_q = torch.tensor([0, num_tasks], device=task_q.device, dtype=torch.int32)
-        cu_seqlens_k = torch.tensor([0, total_tokens], device=all_k.device, dtype=torch.int32)
-        
-        result = flash_attn_varlen_func(
-            task_q, 
-            all_k, 
-            all_v, 
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_k=cu_seqlens_k,
-            max_seqlen_q=num_tasks,
-            max_seqlen_k=total_tokens,
-            softmax_scale=self.scale,
-            causal=False
-        )
-        return result
-
-

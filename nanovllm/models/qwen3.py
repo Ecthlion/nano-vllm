@@ -1,3 +1,4 @@
+import time
 import torch
 from torch import nn
 import torch.distributed as dist
@@ -70,6 +71,7 @@ class Qwen3Attention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         token_types: torch.Tensor | None = None,
+        layerid : int = 0,
     ) -> torch.Tensor:
         qkv = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
@@ -77,7 +79,17 @@ class Qwen3Attention(nn.Module):
         k = self.k_norm(k.view(-1, self.num_kv_heads, self.head_dim))
         v = v.view(-1, self.num_kv_heads, self.head_dim)
         q, k = self.rotary_emb(positions, q, k)
-        o = self.attn(q, k, v, token_types)
+        
+        # torch.cuda.synchronize()
+        # start_time = time.perf_counter()
+        if token_types is not None and layerid > 18:
+            previous_q_ready = hidden_states.view(-1, self.num_heads, self.head_dim)
+            o = self.attn(q, k, v, token_types, previous_q_ready)
+        else:
+            o = self.attn(q, k, v, token_types, None)
+        # torch.cuda.synchronize()
+        # end_time = time.perf_counter()
+        # print(f"{layerid}时间: {(end_time - start_time)*1000:.2f}ms")
         output = self.o_proj(o.flatten(1, -1))
         return output
 
@@ -141,13 +153,14 @@ class Qwen3DecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         residual: torch.Tensor | None,
         token_types: torch.Tensor | None = None,
+        layerid : int = 0,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if residual is None:
             hidden_states, residual = self.input_layernorm(hidden_states), hidden_states
         else:
             hidden_states, residual = self.input_layernorm(hidden_states, residual)
             
-        hidden_states = self.self_attn(positions, hidden_states, token_types)
+        hidden_states = self.self_attn(positions, hidden_states, token_types, layerid)
         
         hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
@@ -172,9 +185,16 @@ class Qwen3Model(nn.Module):
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
         residual = None
+        layerid = 0
         
         for layer in self.layers:
-            hidden_states, residual = layer(positions, hidden_states, residual, token_types)
+            # torch.cuda.synchronize()
+            # start_time = time.perf_counter()
+            hidden_states, residual = layer(positions, hidden_states, residual, token_types, layerid)
+            # torch.cuda.synchronize()
+            # end_time = time.perf_counter()
+            # print(f"{layerid}时间: {(end_time - start_time)*1000:.2f}ms")
+            layerid += 1
 
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states

@@ -90,13 +90,15 @@ class LLMEngine:
         while not self.is_finished():
             t = perf_counter()
             output, num_tokens = self.step()
+            step_time = perf_counter() - t
             if use_tqdm:
                 if num_tokens > 0:
-                    prefill_throughput = num_tokens / (perf_counter() - t)
+                    prefill_throughput = num_tokens / (step_time)
                 else:
                     decode_throughput = -num_tokens / (perf_counter() - t)
                 pbar.set_postfix({
                     "Prefill": f"{int(prefill_throughput)}tok/s",
+                    "PrefillTime": f"{step_time * 1000:.3f} ms",
                     "Decode": f"{int(decode_throughput)}tok/s",
                 })
             for seq_id, token_ids in output:
