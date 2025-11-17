@@ -201,6 +201,7 @@ class KVCacheIndex:
         return seq.text_id and seq.text_id in self.kv_cache_index
 
     def persistence(self):
+        print("[persistence]")
         if self.dirty:
             torch.save(self.kv_cache_index, self.path)
         self.dirty = False

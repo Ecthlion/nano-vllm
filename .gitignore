@@ -195,3 +195,5 @@ cython_debug/
 .cursorindexingignore
 graph/
 trace_*
+*.jsonl
+*.txt

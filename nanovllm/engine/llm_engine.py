@@ -83,6 +83,7 @@ class LLMEngine:
                 if isinstance(item, dict):
                     # remove text decode time
                     text_token_ids = item.get("text_tokens_pruned")
+                    # print(f"[kept text]: { self.tokenizer.decode(text_token_ids) }")
                     pruning_len = item.get("pruning_len")  # type: ignore
                 else:
                     text_token_ids = self.tokenizer.encode(prompt[1][:len(prompt[1])-sampling_params.task_str_len])
@@ -91,6 +92,7 @@ class LLMEngine:
             else:
                 prompt = (prompt[0], self.tokenizer.encode(prompt[1]))
 
+        # print(f"input len: {len(prompt[1])}") # type: ignore
         seq = Sequence(prompt, len(text_token_ids), pruning_len, sampling_params)  # type: ignore
         self.scheduler.add(seq)
 

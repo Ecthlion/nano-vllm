@@ -125,7 +125,7 @@ def main():
         with_stack=False,
     ) as prof:
         start = time()
-        outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
+        outputs = llm.generate(samples, sampling_params, use_index=False, use_tqdm=False)
         end = time()
     prof.export_chrome_trace("trace_task2.json")
 
