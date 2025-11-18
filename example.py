@@ -3,8 +3,7 @@ from time import time
 
 import pandas as pd
 from termcolor import colored
-from torch.profiler import ProfilerActivity, profile, record_function
-from transformers import AutoTokenizer
+from torch.profiler import ProfilerActivity, profile
 
 from nanovllm import LLM, SamplingParams
 
@@ -81,7 +80,9 @@ def main():
         with_stack=False,
     ) as prof:
         start = time()
-        outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False, pruning=True)
+        outputs = llm.generate(
+            samples, sampling_params, use_index=True, use_tqdm=False, pruning=True
+        )
         end = time()
     prof.export_chrome_trace("trace_task1.json")
 
@@ -125,7 +126,9 @@ def main():
         with_stack=False,
     ) as prof:
         start = time()
-        outputs = llm.generate(samples, sampling_params, use_index=False, use_tqdm=False)
+        outputs = llm.generate(
+            samples, sampling_params, use_index=True, use_tqdm=False
+        )
         end = time()
     prof.export_chrome_trace("trace_task2.json")
 
@@ -146,12 +149,15 @@ def main():
     mismatched_count = 0
     for i, (gen_text, true_label) in enumerate(zip(generated, data["sentiment"])):
         if gen_text.lower() not in ["positive", "negative"]:
-            print(f"Index {i}: Invalid output. Generated: '{gen_text}', Expected: '{true_label}'")
+            print(
+                f"Index {i}: Invalid output. Generated: '{gen_text}', Expected: '{true_label}'"
+            )
             mismatched_count += 1
 
     if mismatched_count == 0:
         print("No incorrect or invalid results found.")
     print("--- End of Check ---\n")
+
 
 if __name__ == "__main__":
     main()
