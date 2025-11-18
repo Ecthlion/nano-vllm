@@ -243,7 +243,9 @@ class LLMEngine:
         use_tqdm: bool = True,
         use_index: bool = False,
         pruning: bool = False,
+        sparsity: float = 0.9,
     ) -> list[dict]:
+        self.model_runner.sparsity = sparsity
         start = time()
         self.use_index = use_index
         # Toggle pruning feature for this generation session

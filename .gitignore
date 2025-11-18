@@ -197,3 +197,4 @@ graph/
 trace_*
 *.jsonl
 *.txt
+*.csv

@@ -91,7 +91,7 @@ class Attention(nn.Module):
                 # sim per head, then mean over kv heads -> [N]
                 scores = (k * q_last_per_token).sum(dim=-1).mean(dim=-1)
 
-                alpha = 0.9
+                alpha = context.sparsity
                 pruned_locals: list[torch.Tensor] = []
                 num_pruned = 0
                 # Per-sequence topk on filtered scores

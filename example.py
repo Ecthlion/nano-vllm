@@ -89,7 +89,7 @@ def main():
     print(colored(f"Build index time: {(end - start):.4f} s", "blue"))
 
     # remove prefix cache
-    llm.scheduler.block_manager.reset()
+    # llm.scheduler.block_manager.reset()
 
     ###################################################################
     # print(colored("Task1: suitable for kids", "yellow"))

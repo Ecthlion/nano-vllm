@@ -48,6 +48,7 @@ class ModelRunner:
         self._host_tokens = None
         # Runtime flag (can be mutated externally by LLMEngine)
         self.pruning_enabled = False
+        self.sparsity = 0.9
 
         dist.init_process_group("nccl", "tcp://localhost:2334", world_size=self.world_size, rank=rank)
         torch.cuda.set_device(rank)
@@ -219,7 +220,7 @@ class ModelRunner:
         cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         # Single context set call including pruning flags (indices discovered inside attention later)
-        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables, pruning_enabled=self.pruning_enabled)
+        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables, pruning_enabled=self.pruning_enabled, sparsity=self.sparsity)
         return input_ids, positions
 
     def prepare_decode(self, seqs: list[Sequence]):
