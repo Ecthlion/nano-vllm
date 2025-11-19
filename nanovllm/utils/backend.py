@@ -63,6 +63,6 @@ class BackendAPI:
     def analyse(self, data):
         # draw some analyse picture:
         # 1. 带索引/不带索引的运行时间柱状图比较
-        # 2. 不同sparsity下，与带索引的结果不同的折线图&索引大小折线图
+        # 2. 不同sparsity下，与 (不带索引的 结果不同的 比率) 的折线图&索引大小折线图
         # 3. kv cache transfer 和 compute 的运行时间图
         pass
