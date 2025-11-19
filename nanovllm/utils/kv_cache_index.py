@@ -13,7 +13,12 @@ class KVCacheIndex:
     def __init__(self, gpu_kv_cache, index_name="imdb_kvcache.pt") -> None:
         # Tensor[2, num_layers, num_blocks, block_size, num_kv_heads, head_dim]
         self.gpu_kv_cache = gpu_kv_cache
-        self.path = f"/data/zwt/{index_name}"
+
+        self.save_dir = "/data/zwt/"
+        self.index_name = index_name
+
+        path = f"{self.save_dir}{self.index_name}"
+
         self.dirty = False
         self.indexed = False
         # text_id -> {
@@ -22,8 +27,8 @@ class KVCacheIndex:
         #   "text_tokens_pruned": list[int] | None    # text tokens after pruning
         # }
         self.kv_cache_index: dict = {}
-        if os.path.isfile(self.path):
-            self.kv_cache_index = torch.load(self.path)
+        if os.path.isfile(path):
+            self.kv_cache_index = torch.load(path)
             self.indexed = True
 
             # pin memory when init
@@ -83,23 +88,31 @@ class KVCacheIndex:
 
                 # Filter out pruned positions to get kept slot ids
                 if pruned:
-                    kept_slots = [slot for i, slot in enumerate(token_slots) if i not in pruned]
+                    kept_slots = [
+                        slot for i, slot in enumerate(token_slots) if i not in pruned
+                    ]
                 else:
                     kept_slots = token_slots
 
                 keep_len = len(kept_slots)
                 # Compute pruned text token ids (final pruned state)
-                kept_local_indices = [i for i in range(seq.text_token_len) if i not in pruned]
+                kept_local_indices = [
+                    i for i in range(seq.text_token_len) if i not in pruned
+                ]
                 text_tokens_pruned = [seq.token_ids[i] for i in kept_local_indices]
 
                 assert keep_len != 0
 
-                kept_slots_tensor = torch.tensor(kept_slots, dtype=torch.int64, device=self.gpu_kv_cache.device)
+                kept_slots_tensor = torch.tensor(
+                    kept_slots, dtype=torch.int64, device=self.gpu_kv_cache.device
+                )
                 # Vectorized gather per (kv, layer), then one D2H copy per pair
                 flat_blocks = self.gpu_kv_cache.shape[2] * block_size
                 for kv_idx in range(2):
                     for layer_idx in range(num_layers):
-                        src_flat = self.gpu_kv_cache[kv_idx, layer_idx].reshape(flat_blocks, num_kv_heads, head_dim)
+                        src_flat = self.gpu_kv_cache[kv_idx, layer_idx].reshape(
+                            flat_blocks, num_kv_heads, head_dim
+                        )
                         selected = src_flat.index_select(0, kept_slots_tensor)
                         dst = cpu_kv_cache[kv_idx, layer_idx, :keep_len]
                         dst.copy_(selected, non_blocking=True)
@@ -166,9 +179,7 @@ class KVCacheIndex:
                     if remaining <= 0:
                         break
 
-                    block_tokens = (
-                        remaining if remaining < block_size else block_size
-                    )
+                    block_tokens = remaining if remaining < block_size else block_size
 
                     for kv_idx in range(2):
                         for layer_idx in range(num_layers):
@@ -203,7 +214,8 @@ class KVCacheIndex:
     def persistence(self):
         print("[persistence]")
         if self.dirty:
-            torch.save(self.kv_cache_index, self.path)
+            path = f"{self.save_dir}{self.index_name}"
+            torch.save(self.kv_cache_index, path)
         self.dirty = False
 
 

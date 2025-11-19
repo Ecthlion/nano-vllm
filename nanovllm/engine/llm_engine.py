@@ -36,9 +36,7 @@ class LLMEngine:
             self.ps.append(process)
             self.events.append(event)
         self.model_runner = ModelRunner(config, 0, self.events)
-        self.kv_cache_index = KVCacheIndex(
-            self.model_runner.kv_cache, index_name="imdb_kvcache.pt"
-        )
+        self.kv_cache_index = KVCacheIndex(self.model_runner.kv_cache)
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
         self.scheduler = Scheduler(config)
@@ -59,6 +57,7 @@ class LLMEngine:
             "num_batches": 0,
         }
         atexit.register(self.exit)
+        self.use_index = False
 
     def exit(self):
         if self.use_index:
@@ -70,14 +69,14 @@ class LLMEngine:
             p.join()
 
     def add_request(
-        self, prompt: str | list[int] | tuple[int, str], sampling_params: SamplingParams
+        self, prompt: str | list[int] | tuple[int, str], sampling_params: SamplingParams, use_index
     ):
         text_token_ids = []
         pruning_len = 0
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
         elif isinstance(prompt, tuple):
-            if self.use_index:
+            if use_index:
                 text_id = prompt[0]
                 item = self.kv_cache_index.kv_cache_index.get(text_id)
                 if isinstance(item, dict):
@@ -247,7 +246,7 @@ class LLMEngine:
     ) -> list[dict]:
         self.model_runner.sparsity = sparsity
         start = time()
-        self.use_index = use_index
+        self.use_index = self.use_index or use_index
         # Toggle pruning feature for this generation session
         # Propagate to model runner so it can prepare the runtime context.
         self.model_runner.pruning_enabled = pruning  # type: ignore[attr-defined]
@@ -256,7 +255,7 @@ class LLMEngine:
         if not isinstance(sampling_params, list):
             sampling_params = [sampling_params] * len(prompts)
         for prompt, sp in zip(prompts, sampling_params):
-            self.add_request(prompt, sp)
+            self.add_request(prompt, sp, use_index)
         if use_index:
             # Start prefetch worker once requests are queued
             self._start_prefetcher()
@@ -265,7 +264,7 @@ class LLMEngine:
         prefill_throughput = decode_throughput = 0.0
         end = time()
         print(f"init: {end - start}")
-        while not self.is_finished() or (self.use_index and not self._prefetch_queue.empty()):
+        while not self.is_finished() or (use_index and not self._prefetch_queue.empty()):
             t = perf_counter()
             output, num_tokens = self.step(use_index)
             if use_tqdm:
