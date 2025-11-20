@@ -56,6 +56,7 @@ class LLMEngine:
             "total_compute_ms": 0.0,
             "num_batches": 0,
         }
+        self.last_run_stats: dict[str, float] | None = None
         atexit.register(self.exit)
         self.use_index = False
 
@@ -245,7 +246,8 @@ class LLMEngine:
         sparsity: float = 0.9,
     ) -> list[dict]:
         self.model_runner.sparsity = sparsity
-        start = time()
+        init_start = time()
+        self.last_run_stats = None
         self.use_index = self.use_index or use_index
         # Toggle pruning feature for this generation session
         # Propagate to model runner so it can prepare the runtime context.
@@ -263,7 +265,8 @@ class LLMEngine:
         outputs = {}
         prefill_throughput = decode_throughput = 0.0
         end = time()
-        print(f"init: {end - start}")
+        print(f"init: {end - init_start}")
+        run_start = perf_counter()
         while not self.is_finished() or (use_index and not self._prefetch_queue.empty()):
             t = perf_counter()
             output, num_tokens = self.step(use_index)
@@ -290,18 +293,33 @@ class LLMEngine:
         if use_tqdm:
             pbar.close()  # type: ignore
         torch.cuda.synchronize()
+        run_duration_ms = (perf_counter() - run_start) * 1000
+        self.last_run_stats = {
+            "avg_transfer_ms": 0.0,
+            "avg_compute_ms": run_duration_ms,
+            "num_batches": 0.0,
+            "use_index": use_index,
+            "runtime_ms": run_duration_ms,
+        }
         if use_index:
             total_xfer = self._stats["total_xfer_ms"]
             total_comp = self._stats["total_compute_ms"]
-            nb = self._stats["num_batches"]
-            avg_xfer = total_xfer / nb
-            avg_comp = total_comp / nb
+            nb = max(self._stats["num_batches"], 1)
+            avg_xfer = total_xfer / nb if nb else 0.0
+            avg_comp = total_comp / nb if nb else 0.0
             print(
                 colored(
                     f"\nTiming summary (per batch): H2D avg {avg_xfer:.2f} ms | Compute avg {avg_comp:.2f} ms | batches {nb}",
                     "green",
                 )
             )
+            self.last_run_stats = {
+                "avg_transfer_ms": avg_xfer,
+                "avg_compute_ms": avg_comp,
+                "num_batches": float(nb),
+                "use_index": True,
+                "runtime_ms": run_duration_ms,
+            }
             self._stats = {
                 "total_xfer_ms": 0.0,
                 "total_compute_ms": 0.0,

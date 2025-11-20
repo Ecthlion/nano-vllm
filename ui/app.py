@@ -1,13 +1,18 @@
-from flask import Flask, render_template, request, jsonify
 import os
-import time
-import json
+from flask import Flask, render_template, request, jsonify
+from werkzeug.utils import secure_filename
+
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from nanovllm.utils.backend import BackendAPI
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
+
+backend = BackendAPI()
 
 @app.route('/')
 def index():
@@ -18,15 +23,21 @@ def upload_file():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
     file = request.files['file']
-    if file.filename == '':
+    if file is None:
         return jsonify({'error': 'No selected file'}), 400
-    if file and file.filename.endswith('.csv'):
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    raw_filename = file.filename or ''
+    if raw_filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    filename = secure_filename(raw_filename)
+    if filename.lower().endswith('.csv'):
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        
-        # Simulate progress for saving
-        # In a real app, you might stream the upload and report progress
-        return jsonify({'filepath': filepath})
+        try:
+            meta = backend.load_data(filepath)
+        except Exception as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        return jsonify({'filepath': filepath, 'metadata': meta})
     return jsonify({'error': 'Invalid file type'}), 400
 
 @app.route('/build_index', methods=['POST'])
@@ -34,20 +45,27 @@ def build_index():
     data = request.get_json()
     filepath = data.get('filepath')
     sparsity = data.get('sparsity')
+    field = data.get('field')
+    limit = data.get('limit')
 
     if not filepath or not os.path.exists(filepath):
         return jsonify({'error': 'File not found'}), 400
 
-    # Simulate index building progress
-    # In a real app, this would be a long-running task
-    # You might use Celery or a similar task queue to handle this
-    
-    # Placeholder for index size
-    index_size = os.path.getsize(filepath) * (1 - float(sparsity)) / 1024  # Simulate size in KB
+    try:
+        # Reload data if the user switched files without re-uploading
+        if backend.data_path != filepath:
+            backend.load_data(filepath)
+        sparsity_value = float(sparsity) if sparsity not in (None, '') else 0.9
+        limit_value = int(limit) if limit not in (None, '') else 1000
+        meta = backend.build_index(sparsity_value, field=field, limit=limit_value)
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
 
+    index_size_kb = meta['index_size_bytes'] / 1024 if meta.get('index_size_bytes') else 0
     return jsonify({
         'message': 'Index built successfully',
-        'index_size': f'{index_size:.2f} KB'
+        'index_size': f'{index_size_kb:.2f} KB',
+        'details': meta
     })
 
 @app.route('/query', methods=['POST'])
@@ -55,34 +73,20 @@ def query():
     data = request.get_json()
     query_str = data.get('query')
     use_index = data.get('use_index', False)
-    
-    # Simulate inference time
-    start_time = time.time()
-    time.sleep(2) # Simulate work
-    end_time = time.time()
-    inference_time = end_time - start_time
+    limit = data.get('limit')
 
-    # Simulate results
-    results = [
-        {'id': 1, 'text': 'This movie was fantastic!', 'sentiment': 'positive', 'audience': 'all'},
-        {'id': 3, 'text': 'A truly heartwarming story.', 'sentiment': 'positive', 'audience': 'children'},
-    ]
+    try:
+        limit_value = int(limit) if limit not in (None, '') else 50
+        response = backend.query(query_str or '', use_index=bool(use_index), limit=limit_value)
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
 
-    # Simulate trace data
-    trace_data = {
-        "traceEvents": [
-            {"ph": "X", "name": "KV Cache Transfer", "ts": 0, "dur": 50000, "pid": 1, "tid": 1, "args": {}},
-            {"ph": "X", "name": "Computation", "ts": 25000, "dur": 100000, "pid": 1, "tid": 2, "args": {}},
-            {"ph": "X", "name": "KV Cache Transfer", "ts": 110000, "dur": 60000, "pid": 1, "tid": 1, "args": {}},
-            {"ph": "X", "name": "Computation", "ts": 130000, "dur": 120000, "pid": 1, "tid": 2, "args": {}}
-        ]
-    }
+    return jsonify(response)
 
-    return jsonify({
-        'results': results,
-        'inference_time': f'{inference_time:.4f} seconds',
-        'trace_data': trace_data
-    })
+
+@app.route('/analytics', methods=['GET'])
+def analytics():
+    return jsonify(backend.analyse())
 
 if __name__ == '__main__':
-    app.run(debug=True, port=2025)
+    app.run(debug=True, port=2025, use_reloader=False)
