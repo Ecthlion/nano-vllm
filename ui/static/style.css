@@ -19,7 +19,7 @@ body {
 
 .dashboard-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.75fr) minmax(320px, 0.9fr);
+    grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.75fr);
     gap: 32px;
     align-items: start;
 }
@@ -172,6 +172,7 @@ textarea {
     box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06);
     transition: border 0.2s ease, box-shadow 0.2s ease;
     resize: vertical;
+    box-sizing: border-box;
 }
 
 input[type="number"]:focus,
@@ -190,6 +191,17 @@ input::placeholder {
 
 input[type="range"] {
     width: 100%;
+}
+
+/* keep workflow inputs compact so they stay within card padding */
+.workflow-panel #index-limit,
+.workflow-panel #query-limit {
+    width: min(100%, 240px);
+}
+
+.workflow-panel #query-input {
+    width: min(100%, 640px);
+    min-height: 110px;
 }
 
 .slider-value {
@@ -448,26 +460,26 @@ button:disabled,
 .chart-figure-body {
     position: relative;
     width: 100%;
-    padding-top: 65%;
+    min-height: 260px;
     border-radius: 14px;
-    background: radial-gradient(circle at top, rgba(59, 130, 246, 0.18), rgba(15, 23, 42, 0.12));
+    background: radial-gradient(circle at top, rgba(59, 130, 246, 0.12), rgba(15, 23, 42, 0.08));
+    padding: 12px;
     overflow: hidden;
+    display: flex;
 }
 
-.chart-figure-body img {
-    position: absolute;
-    inset: 12px;
-    width: calc(100% - 24px);
-    height: calc(100% - 24px);
-    object-fit: contain;
+.chart-plot {
+    flex: 1;
+    width: 100%;
+    height: 100%;
     border-radius: 12px;
     background: #ffffff;
-    box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12);
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
     opacity: 0;
     transition: opacity 0.3s ease;
 }
 
-.chart-figure-body[data-state="ready"] img {
+.chart-figure-body[data-state="ready"] .chart-plot {
     opacity: 1;
 }
 
@@ -478,7 +490,7 @@ button:disabled,
     transform: translate(-50%, -50%);
     text-align: center;
     color: #94a3b8;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
     padding: 0 16px;
     line-height: 1.4;
 }
@@ -529,11 +541,9 @@ button:disabled,
     z-index: 1;
 }
 
-.lightbox-content img {
-    max-width: 70vw;
-    max-height: 70vh;
-    border-radius: 12px;
-    object-fit: contain;
+.lightbox-plot {
+    width: min(960px, 82vw);
+    height: min(520px, 75vh);
 }
 
 .lightbox-caption {

@@ -44,14 +44,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const summaryIndexes = document.getElementById('summary-indexes');
     const summaryQueries = document.getElementById('summary-queries');
     const lightbox = document.getElementById('chart-lightbox');
-    const lightboxImage = document.getElementById('lightbox-image');
+    const lightboxPlot = document.getElementById('lightbox-plot');
     const lightboxCaption = document.getElementById('lightbox-caption');
 
     const chartKeys = ['latency', 'diff', 'sparsity', 'kv'];
     const chartBodies = {};
-    const chartImages = {};
+    const chartPlots = {};
     const chartFallbacks = {};
     const chartCaptions = {};
+    const chartState = {};
     const analyticsHintDefault = analyticsHint ? analyticsHint.textContent : '';
 
     chartKeys.forEach((key) => {
@@ -59,9 +60,35 @@ document.addEventListener('DOMContentLoaded', () => {
         chartCaptions[key] = figure ? figure.querySelector('figcaption') : null;
         const body = figure ? figure.querySelector('.chart-figure-body') : null;
         chartBodies[key] = body;
-        chartImages[key] = document.getElementById(`chart-img-${key}`);
+        chartPlots[key] = body ? body.querySelector('.chart-plot') : null;
         chartFallbacks[key] = body ? body.querySelector('.chart-fallback') : null;
     });
+
+    const plotlyConfig = {
+        responsive: true,
+        displaylogo: false,
+        modeBarButtonsToRemove: ['select2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d', 'lasso2d', 'toggleSpikelines'],
+        toImageButtonOptions: {
+            format: 'png',
+            filename: 'nano-vllm-analytics',
+            height: 720,
+            width: 1280,
+            scale: 2,
+        },
+    };
+
+    let plotlyMissingWarned = false;
+
+    const getPlotly = () => {
+        const plotlyLib = window.Plotly;
+        if (!plotlyLib && !plotlyMissingWarned) {
+            console.error('Plotly.js 未加载，请检查网络或脚本标签。');
+            plotlyMissingWarned = true;
+        }
+        return plotlyLib;
+    };
+
+    const cloneFigure = (figure) => JSON.parse(JSON.stringify(figure || { data: [], layout: {} }));
 
     let uploadedFilepath = '';
     let datasetMeta = null;
@@ -536,27 +563,46 @@ document.addEventListener('DOMContentLoaded', () => {
             .text((d) => d.name);
     };
 
-    const updateChartFigure = (key, meta) => {
+    const renderChartFigure = (key, meta) => {
         const body = chartBodies[key];
-        const img = chartImages[key];
+        const plotContainer = chartPlots[key];
         const fallback = chartFallbacks[key];
-        if (!body || !img) {
+        const defaultMsg = fallback ? (fallback.dataset.defaultMessage || fallback.textContent || '') : '';
+        if (!body || !plotContainer) {
             return;
         }
-        const defaultMsg = fallback ? (fallback.dataset.defaultMessage || fallback.textContent || '') : '';
-        if (!meta || !meta.url) {
-            img.removeAttribute('src');
-            body.dataset.state = 'empty';
+        const clearPlot = () => {
+            const plotlyLib = getPlotly();
+            if (plotlyLib) {
+                plotlyLib.purge(plotContainer);
+            }
+            plotContainer.innerHTML = '';
+            plotContainer.dataset.rendered = 'false';
+            chartState[key] = null;
+        };
+
+        if (!meta || !meta.figure || !Array.isArray(meta.figure.data) || meta.figure.data.length === 0) {
             if (fallback) {
                 fallback.textContent = meta && meta.message ? meta.message : defaultMsg;
             }
+            body.dataset.state = 'empty';
+            clearPlot();
             return;
         }
-        const cacheTag = meta.version || Date.now();
-        img.src = `${meta.url}?v=${cacheTag}`;
-        if (meta.alt) {
-            img.alt = meta.alt;
+
+        const plotlyLib = getPlotly();
+        if (!plotlyLib) {
+            if (fallback) {
+                fallback.textContent = 'Plotly.js 未加载，无法渲染图表。';
+            }
+            body.dataset.state = 'empty';
+            return;
         }
+
+        const figure = cloneFigure(meta.figure);
+        plotlyLib.react(plotContainer, figure.data || [], figure.layout || {}, plotlyConfig);
+        plotContainer.dataset.rendered = 'true';
+        chartState[key] = meta;
         body.dataset.state = meta.has_data ? 'ready' : 'empty';
         if (fallback) {
             fallback.textContent = meta.has_data ? defaultMsg : (meta.message || defaultMsg);
@@ -564,17 +610,24 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const openLightbox = (key) => {
-        if (!lightbox || !lightboxImage || !lightboxCaption) {
+        if (!lightbox || !lightboxPlot || !lightboxCaption) {
             return;
         }
-        const img = chartImages[key];
-        const body = chartBodies[key];
-        if (!img || !body || body.dataset.state !== 'ready' || !img.src) {
+        const meta = chartState[key];
+        if (!meta || !meta.figure || !Array.isArray(meta.figure.data) || meta.figure.data.length === 0) {
             return;
         }
+        const plotlyLib = getPlotly();
+        if (!plotlyLib) {
+            return;
+        }
+        const figure = cloneFigure(meta.figure);
+        figure.layout = figure.layout || {};
+        figure.layout.height = 560;
+        figure.layout.margin = Object.assign({ l: 64, r: 32, t: 60, b: 60 }, figure.layout.margin || {});
+        plotlyLib.react(lightboxPlot, figure.data || [], figure.layout, plotlyConfig);
         const caption = chartCaptions[key] ? chartCaptions[key].textContent : '';
-        lightboxImage.src = img.src;
-    lightboxCaption.textContent = caption || 'Analytics Preview';
+        lightboxCaption.textContent = caption || meta.title || 'Analytics Preview';
         lightbox.setAttribute('aria-hidden', 'false');
         lightbox.classList.add('visible');
         document.body.classList.add('no-scroll');
@@ -586,7 +639,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         lightbox.classList.remove('visible');
         lightbox.setAttribute('aria-hidden', 'true');
-        lightboxImage.removeAttribute('src');
+        const plotlyLib = getPlotly();
+        if (lightboxPlot && plotlyLib) {
+            plotlyLib.purge(lightboxPlot);
+            lightboxPlot.innerHTML = '';
+        }
         document.body.classList.remove('no-scroll');
     };
 
@@ -633,7 +690,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         try {
             const payload = await fetchJson('/analytics');
-            const images = (payload && payload.images) || {};
+            const figures = (payload && payload.figures) || {};
             const summary = (payload && payload.summary) || {};
 
             if (analyticsUpdated) {
@@ -649,8 +706,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let readyCount = 0;
             chartKeys.forEach((key) => {
-                const meta = images[key];
-                updateChartFigure(key, meta);
+                const meta = figures[key];
+                renderChartFigure(key, meta);
                 if (meta && meta.has_data) {
                     readyCount += 1;
                 }
@@ -675,7 +732,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setStatus(analyticsStatus, '');
             }
         } catch (error) {
-            chartKeys.forEach((key) => updateChartFigure(key, null));
+            chartKeys.forEach((key) => renderChartFigure(key, null));
             analyticsEmpty.style.display = 'block';
             analyticsEmpty.textContent = error.message || '无法获取分析数据。';
             if (analyticsHint) {

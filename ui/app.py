@@ -1,5 +1,5 @@
 import os
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 
 import sys
@@ -7,12 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nanovllm.utils.backend import BackendAPI
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, os.pardir))
-PICS_FOLDER = os.path.join(PROJECT_ROOT, 'pics')
-
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['PICS_FOLDER'] = PICS_FOLDER
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -93,11 +89,6 @@ def query():
 def analytics():
     return jsonify(backend.analyse())
 
-
-@app.route('/pics/<path:filename>')
-def serve_pic(filename: str):
-    pics_dir = app.config.get('PICS_FOLDER', PICS_FOLDER)
-    return send_from_directory(pics_dir, filename)
 
 if __name__ == '__main__':
     app.run(debug=True, port=2025, use_reloader=False)
