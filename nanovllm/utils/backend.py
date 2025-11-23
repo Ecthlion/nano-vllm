@@ -496,9 +496,11 @@ class BackendAPI:
         kv_timeline: list[dict[str, Any]],
     ) -> None:
         """Generate and save analysis plots to /pics directory."""
-        # Get the path to the pics directory
-        script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        pics_dir = os.path.join(script_dir, "ui", "static", "pics")
+        # Get the path to the pics directory - assumes backend.py is in nanovllm/utils/
+        # Navigate up to project root: nanovllm/utils/backend.py -> nanovllm/utils -> nanovllm -> project_root
+        current_file = os.path.abspath(__file__)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+        pics_dir = os.path.join(project_root, "ui", "static", "pics")
         os.makedirs(pics_dir, exist_ok=True)
 
         # Set matplotlib style for scientific appearance
