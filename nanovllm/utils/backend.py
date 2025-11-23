@@ -9,6 +9,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 from nanovllm.llm import LLM
 from nanovllm.sampling_params import SamplingParams
@@ -632,7 +633,6 @@ class BackendAPI:
         plt.grid(axis='y', alpha=0.3, linestyle='--')
         
         # Add custom legend for index usage
-        from matplotlib.patches import Patch
         legend_elements = [
             Patch(facecolor='#4CAF50', alpha=0.8, edgecolor='black', label='With Index'),
             Patch(facecolor='#FF5722', alpha=0.8, edgecolor='black', label='Without Index')
