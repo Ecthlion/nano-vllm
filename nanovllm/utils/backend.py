@@ -3,12 +3,73 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Iterable
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib import font_manager, ft2font  # type: ignore[import]
 
 import pandas as pd
 
 from nanovllm.llm import LLM
 from nanovllm.sampling_params import SamplingParams
+
+
+def _font_supports_chars(font_path: str, sample: str) -> bool:
+    try:
+        font = ft2font.FT2Font(font_path)
+    except OSError:
+        return False
+    charmap = font.get_charmap()
+    targets = {ord(char) for char in sample if char.strip()}
+    return targets.issubset(charmap.keys())
+
+
+def _configure_matplotlib_fonts() -> None:
+    sample_text = "使用索引未稀疏度查询构建结果漂移"
+    preferred_fonts = [
+        "Noto Sans CJK SC",
+        "Source Han Sans SC",
+        "Microsoft YaHei",
+        "PingFang SC",
+        "WenQuanYi Micro Hei",
+        "SimHei",
+    ]
+
+    def pick_font() -> tuple[str | None, str | None]:
+        for font_name in preferred_fonts:
+            try:
+                font_path = font_manager.findfont(font_name, fallback_to_default=False)
+            except ValueError:
+                continue
+            if font_path and _font_supports_chars(font_path, sample_text):
+                return font_name, font_path
+        for entry in font_manager.fontManager.ttflist:
+            font_path = getattr(entry, "fname", None)
+            if not font_path or not os.path.exists(font_path):
+                continue
+            try:
+                if _font_supports_chars(font_path, sample_text):
+                    font_name = getattr(entry, "name", None) or os.path.basename(font_path)
+                    return font_name, font_path
+            except OSError:
+                continue
+        return None, None
+
+    font_name, font_path = pick_font()
+    if font_name:
+        matplotlib.rcParams["font.family"] = [font_name, "sans-serif"]
+        matplotlib.rcParams["font.sans-serif"] = [font_name, "DejaVu Sans"]
+        print(f"[backend] Matplotlib will render charts using '{font_name}' ({font_path}).")
+    else:
+        print("[backend] Warning: No CJK-capable font found; charts may show missing glyphs.")
+    matplotlib.rcParams["axes.unicode_minus"] = False
+
+
+_configure_matplotlib_fonts()
 
 
 @dataclass
@@ -26,6 +87,14 @@ class BackendAPI:
         re.IGNORECASE,
     )
     TEMPLATE_PATTERN = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    PICS_DIR = os.path.join(PROJECT_ROOT, "pics")
+    CHART_FILES = {
+        "latency": "analytics_latency.png",
+        "diff": "analytics_diff.png",
+        "sparsity": "analytics_sparsity.png",
+        "kv": "analytics_kv.png",
+    }
 
     def __init__(self) -> None:
         print("init backend")
@@ -39,6 +108,7 @@ class BackendAPI:
         self.current_sparsity: float | None = None
         self.index_limit: int | None = None
         self.analytics: dict[str, list[dict[str, Any]]] = {"indexes": [], "queries": []}
+        os.makedirs(self.PICS_DIR, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Data Loading & Indexing
@@ -473,17 +543,194 @@ class BackendAPI:
             for q in queries
             if q.get("transfer_ms") or q.get("compute_ms")
         ]
-
-        return {
+        charts = self._render_analytics_images(
+            latency_bar=latency_bar,
+            diff_points=diff_points,
+            sparsity_curve=sparsity_curve,
+            kv_timeline=kv_timeline,
+        )
+        summary = {
+            "index_builds": len(indexes),
+            "query_runs": len(queries),
+            "generated_at": int(time.time()),
+        }
+        metrics = {
             "latency_bar": latency_bar,
             "diff_points": diff_points,
             "sparsity_curve": sparsity_curve,
             "kv_timeline": kv_timeline,
         }
+        return {
+            "images": charts,
+            "summary": summary,
+            "metrics": metrics,
+        }
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _render_analytics_images(
+        self,
+        *,
+        latency_bar: dict[str, float],
+        diff_points: list[dict[str, Any]],
+        sparsity_curve: list[dict[str, Any]],
+        kv_timeline: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        os.makedirs(self.PICS_DIR, exist_ok=True)
+        version = int(time.time())
+        statuses = {
+            "latency": self._plot_latency_chart(latency_bar),
+            "diff": self._plot_diff_chart(diff_points),
+            "sparsity": self._plot_sparsity_chart(sparsity_curve),
+            "kv": self._plot_kv_chart(kv_timeline),
+        }
+        payload: dict[str, dict[str, Any]] = {}
+        for key, status in statuses.items():
+            filename = self.CHART_FILES[key]
+            payload[key] = {
+                "url": f"/pics/{filename}",
+                "filename": filename,
+                "version": version,
+                "has_data": status.get("has_data", False),
+                "message": status.get("message", ""),
+                "alt": status.get("alt"),
+            }
+        return payload
+
+    def _chart_path(self, key: str) -> str:
+        filename = self.CHART_FILES[key]
+        return os.path.join(self.PICS_DIR, filename)
+
+    def _finalize_chart(self, fig, filepath: str) -> None:
+        fig.tight_layout()
+        fig.savefig(filepath, dpi=160, bbox_inches="tight")
+        plt.close(fig)
+
+    def _draw_placeholder(self, ax, message: str) -> None:
+        ax.set_axis_off()
+        ax.text(
+            0.5,
+            0.5,
+            message,
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#475569",
+            wrap=True,
+        )
+
+    def _plot_latency_chart(self, latency_bar: dict[str, float]) -> dict[str, Any]:
+        fig, ax = plt.subplots(figsize=(5.5, 3.6))
+        labels = ["使用索引", "未使用索引"]
+        values = [float(latency_bar.get("with_index", 0)), float(latency_bar.get("without_index", 0))]
+        has_data = any(value > 0 for value in values)
+        if has_data:
+            colors = ["#16a34a", "#f97316"]
+            ax.bar(labels, values, color=colors, alpha=0.9)
+            ax.set_ylabel("平均延迟 (ms)")
+            ax.set_title("索引 VS 基准")
+            for idx, value in enumerate(values):
+                ax.text(idx, value + max(values) * 0.02, f"{value:.1f}", ha="center", fontsize=11)
+        else:
+            self._draw_placeholder(ax, "运行一次索引查询和一次基准查询以比较延迟。")
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
+        self._finalize_chart(fig, self._chart_path("latency"))
+        return {
+            "has_data": has_data,
+            "message": "运行一次索引查询与一次基准查询以比较延迟。",
+            "alt": "Latency comparison",
+        }
+
+    def _plot_diff_chart(self, diff_points: list[dict[str, Any]]) -> dict[str, Any]:
+        fig, ax = plt.subplots(figsize=(5.5, 3.6))
+        if diff_points:
+            xs = [max(0.0, min(1.0, float(point.get("diff_ratio") or 0))) for point in diff_points]
+            ys = [float(point.get("sparsity") or 0) for point in diff_points]
+            ax.scatter(xs, ys, s=70, c="#f97316", edgecolors="#c2410c", alpha=0.85)
+            ax.set_xlabel("结果差异比例")
+            ax.set_ylabel("稀疏度")
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, max(1, max(ys + [0])))
+            ax.set_title("索引漂移")
+        else:
+            self._draw_placeholder(ax, "运行索引与非索引查询以比较结果漂移。")
+        ax.grid(True, linestyle="--", alpha=0.25)
+        self._finalize_chart(fig, self._chart_path("diff"))
+        return {
+            "has_data": bool(diff_points),
+            "message": "运行索引与非索引查询以比较结果漂移。",
+            "alt": "Result drift scatter",
+        }
+
+    def _plot_sparsity_chart(self, sparsity_curve: list[dict[str, Any]]) -> dict[str, Any]:
+        fig, ax = plt.subplots(figsize=(5.5, 3.6))
+        if sparsity_curve:
+            points = [
+                (
+                    datetime.fromtimestamp(item.get("timestamp", 0)),
+                    float(item.get("sparsity") or 0),
+                )
+                for item in sparsity_curve
+                if item.get("timestamp")
+            ]
+            points.sort(key=lambda pair: pair[0])
+            if points:
+                xs, ys = zip(*points)
+                ax.plot(xs, ys, color="#0f172a", linewidth=2.2, marker="o")
+                ax.set_ylim(0, 1)
+                ax.set_ylabel("稀疏度")
+                ax.set_xlabel("构建时间")
+                ax.set_title("索引稀疏度趋势")
+                fig.autofmt_xdate(rotation=20)
+            else:
+                self._draw_placeholder(ax, "构建至少一次索引以查看稀疏度趋势。")
+        else:
+            self._draw_placeholder(ax, "构建至少一次索引以查看稀疏度趋势。")
+        ax.grid(True, linestyle="--", alpha=0.25)
+        self._finalize_chart(fig, self._chart_path("sparsity"))
+        return {
+            "has_data": bool(sparsity_curve),
+            "message": "构建至少一次索引以查看稀疏度趋势。",
+            "alt": "Sparsity timeline",
+        }
+
+    def _plot_kv_chart(self, kv_timeline: list[dict[str, Any]]) -> dict[str, Any]:
+        fig, ax = plt.subplots(figsize=(5.5, 3.6))
+        if kv_timeline:
+            rows = [
+                (
+                    datetime.fromtimestamp(item.get("timestamp", 0)),
+                    float(item.get("transfer_ms") or 0),
+                    float(item.get("compute_ms") or 0),
+                )
+                for item in kv_timeline
+                if item.get("timestamp")
+            ]
+            rows.sort(key=lambda row: row[0])
+            if rows:
+                xs = [row[0] for row in rows]
+                transfer = [row[1] for row in rows]
+                compute = [row[2] for row in rows]
+                ax.plot(xs, transfer, label="传输", color="#2563eb", linewidth=2)
+                ax.plot(xs, compute, label="计算", color="#facc15", linewidth=2)
+                ax.set_ylabel("时间 (ms)")
+                ax.set_xlabel("查询时间")
+                ax.legend()
+                ax.set_title("KV Cache 时间线")
+                fig.autofmt_xdate(rotation=20)
+            else:
+                self._draw_placeholder(ax, "运行查询以收集 KV 传输与计算时间。")
+        else:
+            self._draw_placeholder(ax, "运行查询以收集 KV 传输与计算时间。")
+        ax.grid(True, linestyle="--", alpha=0.25)
+        self._finalize_chart(fig, self._chart_path("kv"))
+        return {
+            "has_data": bool(kv_timeline),
+            "message": "运行查询以收集 KV 传输与计算时间。",
+            "alt": "KV cache timeline",
+        }
+
     def _ensure_data_loaded(self) -> None:
         if self.data is None:
             raise RuntimeError("Dataset not loaded. Please upload a CSV first.")

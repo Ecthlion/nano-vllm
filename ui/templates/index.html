@@ -13,114 +13,155 @@
             <p>Upload structured data, build an index with KV cache pruning, run hybrid queries, and inspect live analytics.</p>
         </header>
 
-        <section class="steps-section">
-            <div class="steps-grid">
-                <!-- Step 1: File Upload -->
-                <div class="step-card" id="upload-card">
-                    <h2>Step 1 · Upload</h2>
-                    <p>Choose a CSV file to explore. The service infers the default text column automatically.</p>
-                    <form id="upload-form">
-                        <label class="file-input-label" for="file-input">Select CSV</label>
-                        <input type="file" id="file-input" name="file" accept=".csv" required>
-                        <button type="submit">Upload</button>
-                    </form>
-                    <div class="progress-bar-container" id="upload-progress-container" style="display: none;">
-                        <div class="progress-bar" id="upload-progress"></div>
-                    </div>
-                    <p id="upload-status" class="status-text"></p>
-                    <div id="upload-meta" class="meta-panel" style="display: none;"></div>
-                </div>
-
-                <!-- Step 2: Build Index -->
-                <div class="step-card disabled" id="index-card">
-                    <h2>Step 2 · Index</h2>
-                    <p>Tune sparsity and build the KV cache index for fast LLM-powered filtering.</p>
-                    <form id="index-form">
-                        <label for="sparsity-slider">Sparsity</label>
-                        <input type="range" id="sparsity-slider" name="sparsity" min="0" max="1" step="0.05" value="0.5">
-                        <div class="slider-value">Selected: <span id="sparsity-value">0.5</span></div>
-
-                        <label for="field-select">Text Field</label>
-                        <select id="field-select" name="field"></select>
-
-                        <label for="index-limit">Index Limit</label>
-                        <input type="number" id="index-limit" name="limit" min="1" placeholder="Default 1000">
-
-                        <button type="submit">Build Index</button>
-                    </form>
-                    <div class="progress-bar-container" id="index-progress-container" style="display: none;">
-                        <div class="progress-bar" id="index-progress"></div>
-                    </div>
-                    <div id="index-info" class="meta-panel" style="display: none;"></div>
-                </div>
-
-                <!-- Step 3: Query -->
-                <div class="step-card disabled" id="query-card">
-                    <h2>Step 3 · Query</h2>
-                    <p>Compose filters with Pandas syntax and optional <code>LLM("prompt") == "label"</code> clauses.</p>
-                    <form id="query-form">
-                        <label for="query-input">Query Expression</label>
-                        <textarea id="query-input" name="query" rows="4" placeholder="(sentiment == 'positive') and LLM('Is this kids-friendly?') == 'yes'"></textarea>
-
-                        <label for="query-limit">Preview Limit</label>
-                        <input type="number" id="query-limit" name="limit" min="1" placeholder="Default 50">
-
-                        <div class="button-group">
-                            <button type="button" id="query-with-index">Run with Index</button>
-                            <button type="button" id="query-without-index">Run without Index</button>
+        <div class="dashboard-grid">
+            <section class="analytics-panel">
+                <div class="analytics-hero">
+                    <div class="analytics-header">
+                        <div>
+                            <h2>Analytics</h2>
+                            <p class="analytics-subtitle">Server-side renderings that highlight latency, drift, sparsity and KV timelines at a glance.</p>
                         </div>
-                    </form>
-                    <div class="progress-bar-container" id="query-progress-container" style="display: none;">
-                        <div class="progress-bar" id="query-progress"></div>
+                        <span id="analytics-updated" class="analytics-updated">--</span>
                     </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="results-section">
-            <div class="step-card" id="results-card" style="display: none;">
-                <h2>Query Results</h2>
-                <div id="results-info" class="meta-panel"></div>
-                <div id="results-table-container">
-                    <table id="results-table">
-                        <thead></thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-                <h3>Execution Trace</h3>
-                <div id="trace-container"></div>
-            </div>
-        </section>
-
-        <section class="analytics-section">
-            <div class="step-card" id="analytics-card">
-                <h2>Analytics</h2>
-                <p>Compare index versus baseline performance, inspect sparsity trends, and monitor KV cache timings.</p>
-                <div class="button-row">
-                    <button type="button" id="analytics-btn">Refresh Analytics</button>
-                    <span id="analytics-status" class="status-text"></span>
+                    <div class="analytics-summary" id="analytics-summary">
+                        <div class="summary-chip">
+                            <span class="chip-label">索引构建</span>
+                            <span class="chip-value" id="summary-indexes">0</span>
+                        </div>
+                        <div class="summary-chip">
+                            <span class="chip-label">查询执行</span>
+                            <span class="chip-value" id="summary-queries">0</span>
+                        </div>
+                        <div class="summary-chip">
+                            <span class="chip-label">刷新状态</span>
+                            <span class="chip-value chip-status" id="analytics-status">待刷新</span>
+                        </div>
+                    </div>
+                    <div class="button-row analytics-row">
+                        <button type="button" id="analytics-btn">刷新 Analytics</button>
+                        <span id="analytics-hint" class="status-text muted">运行一次索引和查询后刷新以生成图表。</span>
+                    </div>
                 </div>
                 <div id="analytics-empty" class="meta-panel" style="display: none;"></div>
-                <div class="chart-grid" id="analytics-grid">
-                    <div class="chart-card">
-                        <h3>Latency Comparison</h3>
-                        <div class="chart" id="latency-chart"></div>
+                <div class="chart-grid analytics-grid" id="analytics-grid">
+                    <figure class="chart-card analytics-figure" data-chart-key="latency" tabindex="0" role="button" aria-pressed="false">
+                        <div class="chart-figure-body" data-state="empty">
+                            <img id="chart-img-latency" alt="Latency comparison" loading="lazy">
+                            <p class="chart-fallback" data-default-message="运行索引和非索引查询后刷新查看延迟对比。">运行索引和非索引查询后刷新查看延迟对比。</p>
+                        </div>
+                        <figcaption>Latency Comparison</figcaption>
+                    </figure>
+                    <figure class="chart-card analytics-figure" data-chart-key="diff" tabindex="0" role="button" aria-pressed="false">
+                        <div class="chart-figure-body" data-state="empty">
+                            <img id="chart-img-diff" alt="Result drift" loading="lazy">
+                            <p class="chart-fallback" data-default-message="运行索引与非索引查询来比较结果漂移。">运行索引与非索引查询来比较结果漂移。</p>
+                        </div>
+                        <figcaption>Result Drift</figcaption>
+                    </figure>
+                    <figure class="chart-card analytics-figure" data-chart-key="sparsity" tabindex="0" role="button" aria-pressed="false">
+                        <div class="chart-figure-body" data-state="empty">
+                            <img id="chart-img-sparsity" alt="Sparsity timeline" loading="lazy">
+                            <p class="chart-fallback" data-default-message="构建至少一次索引以查看稀疏度趋势。">构建至少一次索引以查看稀疏度趋势。</p>
+                        </div>
+                        <figcaption>Sparsity Timeline</figcaption>
+                    </figure>
+                    <figure class="chart-card analytics-figure" data-chart-key="kv" tabindex="0" role="button" aria-pressed="false">
+                        <div class="chart-figure-body" data-state="empty">
+                            <img id="chart-img-kv" alt="KV cache timeline" loading="lazy">
+                            <p class="chart-fallback" data-default-message="运行查询以收集 KV 传输与计算时间。">运行查询以收集 KV 传输与计算时间。</p>
+                        </div>
+                        <figcaption>KV Cache Timeline</figcaption>
+                    </figure>
+                </div>
+            </section>
+
+            <section class="workflow-panel">
+                <div class="steps-stack">
+                    <!-- Step 1: File Upload -->
+                    <div class="step-card" id="upload-card">
+                        <h2>Step 1 · Upload</h2>
+                        <p>Choose a CSV file to explore. The service infers the default text column automatically.</p>
+                        <form id="upload-form">
+                            <input type="file" id="file-input" name="file" accept=".csv" required>
+                            <button type="button" id="upload-trigger">Select &amp; Upload CSV</button>
+                            <p id="upload-selected" class="status-text muted">尚未选择文件</p>
+                        </form>
+                        <div class="progress-bar-container" id="upload-progress-container" style="display: none;">
+                            <div class="progress-bar" id="upload-progress"></div>
+                        </div>
+                        <p id="upload-status" class="status-text"></p>
+                        <div id="upload-meta" class="meta-panel" style="display: none;"></div>
                     </div>
-                    <div class="chart-card">
-                        <h3>Result Drift</h3>
-                        <div class="chart" id="diff-chart"></div>
+
+                    <!-- Step 2: Build Index -->
+                    <div class="step-card disabled" id="index-card">
+                        <h2>Step 2 · Index</h2>
+                        <p>Tune sparsity and build the KV cache index for fast LLM-powered filtering.</p>
+                        <form id="index-form">
+                            <label for="sparsity-slider">Sparsity</label>
+                            <input type="range" id="sparsity-slider" name="sparsity" min="0" max="1" step="0.05" value="0.5">
+                            <div class="slider-value">Selected: <span id="sparsity-value">0.5</span></div>
+
+                            <label for="field-select">Text Field</label>
+                            <select id="field-select" name="field"></select>
+
+                            <label for="index-limit">Index Limit</label>
+                            <input type="number" id="index-limit" name="limit" min="1" placeholder="Default 1000">
+
+                            <button type="submit">Build Index</button>
+                        </form>
+                        <div class="progress-bar-container" id="index-progress-container" style="display: none;">
+                            <div class="progress-bar" id="index-progress"></div>
+                        </div>
+                        <div id="index-info" class="meta-panel" style="display: none;"></div>
                     </div>
-                    <div class="chart-card">
-                        <h3>Sparsity Timeline</h3>
-                        <div class="chart" id="sparsity-chart"></div>
-                    </div>
-                    <div class="chart-card">
-                        <h3>KV Latency Timeline</h3>
-                        <div class="chart" id="kv-chart"></div>
+
+                    <!-- Step 3: Query -->
+                    <div class="step-card disabled" id="query-card">
+                        <h2>Step 3 · Query</h2>
+                        <p>Compose filters with Pandas syntax and optional <code>LLM("prompt") == "label"</code> clauses.</p>
+                        <form id="query-form">
+                            <label for="query-input">Query Expression</label>
+                            <textarea id="query-input" name="query" rows="4" placeholder="(sentiment == 'positive') and LLM('Is this kids-friendly?') == 'yes'"></textarea>
+
+                            <label for="query-limit">Preview Limit</label>
+                            <input type="number" id="query-limit" name="limit" min="1" placeholder="Default 50">
+
+                            <div class="button-group">
+                                <button type="button" id="query-with-index">Run with Index</button>
+                                <button type="button" id="query-without-index">Run without Index</button>
+                            </div>
+                        </form>
+                        <div class="progress-bar-container" id="query-progress-container" style="display: none;">
+                            <div class="progress-bar" id="query-progress"></div>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </section>
+
+                <section class="results-section">
+                    <div class="step-card" id="results-card" style="display: none;">
+                        <h2>Query Results</h2>
+                        <div id="results-info" class="meta-panel"></div>
+                        <div id="results-table-container">
+                            <table id="results-table">
+                                <thead></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <h3>Execution Trace</h3>
+                        <div id="trace-container"></div>
+                    </div>
+                </section>
+            </section>
+        </div>
+    </div>
+    <div class="chart-lightbox" id="chart-lightbox" aria-hidden="true">
+        <div class="lightbox-backdrop" data-close="true"></div>
+        <div class="lightbox-content" role="dialog" aria-modal="true" aria-labelledby="lightbox-caption">
+            <button type="button" class="lightbox-close" aria-label="关闭" data-close="true">×</button>
+            <img id="lightbox-image" alt="Analytics preview" loading="lazy">
+            <p id="lightbox-caption"></p>
+        </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
