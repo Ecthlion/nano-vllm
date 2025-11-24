@@ -89,4 +89,4 @@ def analytics():
     return jsonify(backend.analyse())
 
 if __name__ == '__main__':
-    app.run(debug=True, port=2025, use_reloader=False)
+    app.run(debug=True, port=2026, use_reloader=False)

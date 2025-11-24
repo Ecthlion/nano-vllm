@@ -50,7 +50,7 @@ class ModelRunner:
         self.pruning_enabled = False
         self.sparsity = 0.9
 
-        dist.init_process_group("nccl", "tcp://localhost:2334", world_size=self.world_size, rank=rank)
+        dist.init_process_group("nccl", "tcp://localhost:2335", world_size=self.world_size, rank=rank)
         torch.cuda.set_device(rank)
         default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(hf_config.torch_dtype)

@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     statusP.textContent = `File uploaded successfully: ${fileInput.files[0].name}`;
                     statusP.style.color = 'green';
                     uploadedFilepath = data.filepath;
-                    document.getElementById('index-card').style.display = 'block';
+                    // document.getElementById('index-card').style.display = 'block'; // Already visible
                 }
             } else {
                 statusP.textContent = `Error: ${xhr.statusText}`;
@@ -100,7 +100,7 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 document.getElementById('index-size').textContent = data.index_size;
                 indexInfo.style.display = 'block';
-                document.getElementById('query-card').style.display = 'block';
+                // document.getElementById('query-card').style.display = 'block'; // Already visible
             }
         })
         .catch(error => {
@@ -155,20 +155,34 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Step 4: Display Results ---
+    let currentResults = [];
+    let currentPage = 1;
+    const rowsPerPage = 10;
+
     function displayResults(data) {
         document.getElementById('results-card').style.display = 'block';
         
         // Display inference time
         document.getElementById('inference-time').textContent = data.inference_time;
+        document.getElementById('total-results').textContent = data.results.length;
 
-        // Display results table
+        currentResults = data.results;
+        currentPage = 1;
+        renderTable();
+        renderPagination();
+
+        // Display trace visualization
+        renderTrace(data.trace_data);
+    }
+
+    function renderTable() {
         const tableHead = document.querySelector('#results-table thead');
         const tableBody = document.querySelector('#results-table tbody');
         tableHead.innerHTML = '';
         tableBody.innerHTML = '';
 
-        if (data.results.length > 0) {
-            const headers = Object.keys(data.results[0]);
+        if (currentResults.length > 0) {
+            const headers = Object.keys(currentResults[0]);
             const headerRow = document.createElement('tr');
             headers.forEach(header => {
                 const th = document.createElement('th');
@@ -177,20 +191,54 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             tableHead.appendChild(headerRow);
 
-            data.results.forEach(row => {
+            const start = (currentPage - 1) * rowsPerPage;
+            const end = start + rowsPerPage;
+            const pageData = currentResults.slice(start, end);
+
+            pageData.forEach(row => {
                 const tr = document.createElement('tr');
                 headers.forEach(header => {
                     const td = document.createElement('td');
                     td.textContent = row[header];
+                    td.title = row[header]; // Tooltip for full text
                     tr.appendChild(td);
                 });
                 tableBody.appendChild(tr);
             });
         }
-
-        // Display trace visualization
-        renderTrace(data.trace_data);
     }
+
+    function renderPagination() {
+        const paginationControls = document.getElementById('pagination-controls');
+        if (currentResults.length <= rowsPerPage) {
+            paginationControls.style.display = 'none';
+            return;
+        }
+
+        paginationControls.style.display = 'block';
+        const totalPages = Math.ceil(currentResults.length / rowsPerPage);
+        document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+        
+        document.getElementById('prev-page').disabled = currentPage === 1;
+        document.getElementById('next-page').disabled = currentPage === totalPages;
+    }
+
+    document.getElementById('prev-page').addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            renderTable();
+            renderPagination();
+        }
+    });
+
+    document.getElementById('next-page').addEventListener('click', () => {
+        const totalPages = Math.ceil(currentResults.length / rowsPerPage);
+        if (currentPage < totalPages) {
+            currentPage++;
+            renderTable();
+            renderPagination();
+        }
+    });
 
     function renderTrace(traceData) {
         const container = document.getElementById('trace-container');

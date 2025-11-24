@@ -3,79 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nano-vLLM Demo</title>
+    <title>SemInfer</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Nano-vLLM: A Demonstration</h1>
+    <header class="navbar">
+        <div class="navbar-content">
+            <h1>SemInfer</h1>
             <p>A demonstration UI for processing relational data tables with large language models.</p>
-        </header>
-
-        <!-- Step 1: File Upload -->
-        <div class="step-card" id="upload-card">
-            <h2>Step 1: Upload Data</h2>
-            <p>Select a CSV file to begin processing.</p>
-            <form id="upload-form">
-                <input type="file" id="file-input" name="file" accept=".csv" required>
-                <button type="submit">Upload</button>
-            </form>
-            <div class="progress-bar-container" id="upload-progress-container" style="display: none;">
-                <div class="progress-bar" id="upload-progress"></div>
-            </div>
-            <p id="upload-status"></p>
         </div>
+    </header>
 
-        <!-- Step 2: Build Index -->
-        <div class="step-card" id="index-card" style="display: none;">
-            <h2>Step 2: Build Index</h2>
-            <p>Select the desired sparsity and build the index.</p>
-            <form id="index-form">
-                <label for="sparsity-slider">Sparsity:</label>
-                <input type="range" id="sparsity-slider" name="sparsity" min="0" max="1" step="0.05" value="0.5">
-                <span id="sparsity-value">0.5</span>
-                <button type="submit">Build Index</button>
-            </form>
-            <div class="progress-bar-container" id="index-progress-container" style="display: none;">
-                <div class="progress-bar" id="index-progress"></div>
-            </div>
-            <div id="index-info" style="display: none;">
-                <p>Index Size: <span id="index-size"></span></p>
-            </div>
-        </div>
-
-        <!-- Step 3: Query -->
-        <div class="step-card" id="query-card" style="display: none;">
-            <h2>Step 3: Run Query</h2>
-            <p>Enter a query using Pandas-like syntax to filter the data.</p>
-            <form id="query-form">
-                <input type="text" id="query-input" name="query" placeholder="e.g., (sentiment == 'positive') & (audience == 'children')">
-                <div class="button-group">
-                    <button type="button" id="query-with-index">Run with Index</button>
-                    <button type="button" id="query-without-index">Run without Index</button>
+    <div class="main-container">
+        <aside class="sidebar">
+            <!-- Step 1: File Upload -->
+            <div class="step-card" id="upload-card">
+                <h2>Step 1: Upload Data</h2>
+                <p>Select a CSV file to begin processing.</p>
+                <form id="upload-form">
+                    <input type="file" id="file-input" name="file" accept=".csv" required>
+                    <button type="submit">Upload</button>
+                </form>
+                <div class="progress-bar-container" id="upload-progress-container" style="display: none;">
+                    <div class="progress-bar" id="upload-progress"></div>
                 </div>
-            </form>
-            <div class="progress-bar-container" id="query-progress-container" style="display: none;">
-                <div class="progress-bar" id="query-progress"></div>
+                <p id="upload-status"></p>
             </div>
-        </div>
 
-        <!-- Step 4: Results -->
-        <div class="step-card" id="results-card" style="display: none;">
-            <h2>Results</h2>
-            <div id="results-info">
-                <p>Inference Time: <span id="inference-time"></span></p>
+            <!-- Step 2: Build Index -->
+            <div class="step-card" id="index-card">
+                <h2>Step 2: Build Index</h2>
+                <p>Select the desired sparsity and build the index.</p>
+                <form id="index-form">
+                    <label for="sparsity-slider">Sparsity:</label>
+                    <input type="range" id="sparsity-slider" name="sparsity" min="0" max="1" step="0.05" value="0.5">
+                    <span id="sparsity-value">0.5</span>
+                    <button type="submit">Build Index</button>
+                </form>
+                <div class="progress-bar-container" id="index-progress-container" style="display: none;">
+                    <div class="progress-bar" id="index-progress"></div>
+                </div>
+                <div id="index-info" style="display: none;">
+                    <p>Index Size: <span id="index-size"></span></p>
+                </div>
             </div>
-            <div id="results-table-container">
-                <table id="results-table">
-                    <thead></thead>
-                    <tbody></tbody>
-                </table>
+
+            <!-- Step 3: Query -->
+            <div class="step-card" id="query-card">
+                <h2>Step 3: Run Query</h2>
+                <p>Enter a query using Pandas-like syntax to filter the data.</p>
+                <form id="query-form">
+                    <input type="text" id="query-input" name="query" placeholder="e.g., (sentiment == 'positive') & (audience == 'children')">
+                    <div class="button-group">
+                        <button type="button" id="query-with-index">Run with Index</button>
+                        <button type="button" id="query-without-index">Run without Index</button>
+                    </div>
+                </form>
+                <div class="progress-bar-container" id="query-progress-container" style="display: none;">
+                    <div class="progress-bar" id="query-progress"></div>
+                </div>
             </div>
-            <h3>Execution Trace</h3>
-            <div id="trace-container"></div>
-        </div>
+        </aside>
+
+        <main class="content-area">
+            <!-- Step 4: Results -->
+            <div class="step-card" id="results-card" style="display: none;">
+                <h2>Results</h2>
+                <div id="results-info">
+                    <p>Inference Time: <span id="inference-time"></span></p>
+                    <p>Total Results: <span id="total-results"></span></p>
+                </div>
+                <div id="results-table-container">
+                    <table id="results-table">
+                        <thead></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div id="pagination-controls" style="margin-top: 10px; text-align: center; display: none;">
+                    <button id="prev-page" disabled>Previous</button>
+                    <span id="page-info">Page 1</span>
+                    <button id="next-page">Next</button>
+                </div>
+                <h3>Execution Trace</h3>
+                <div id="trace-container"></div>
+            </div>
+        </main>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
