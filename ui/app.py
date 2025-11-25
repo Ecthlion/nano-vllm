@@ -18,6 +18,27 @@ backend = BackendAPI()
 def index():
     return render_template('index.html')
 
+@app.route('/check_file', methods=['POST'])
+def check_file():
+    data = request.get_json()
+    filename = data.get('filename')
+    if not filename:
+        return jsonify({'error': 'Filename required'}), 400
+    
+    secure_name = secure_filename(filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], secure_name)
+    
+    if os.path.exists(filepath):
+        # If file exists, we might want to load it into backend as well
+        # to ensure backend state is consistent with the "uploaded" file
+        try:
+            meta = backend.load_data(filepath)
+            return jsonify({'exists': True, 'filepath': filepath, 'metadata': meta})
+        except Exception as exc:
+             return jsonify({'error': str(exc)}), 400
+
+    return jsonify({'exists': False})
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -61,10 +82,10 @@ def build_index():
     except Exception as exc:
         return jsonify({'error': str(exc)}), 400
 
-    index_size_kb = meta['index_size_bytes'] / 1024 if meta.get('index_size_bytes') else 0
+    index_size_gb = meta['index_size_bytes'] / 1024 / 1024 / 1024 if meta.get('index_size_bytes') else 0
     return jsonify({
         'message': 'Index built successfully',
-        'index_size': f'{index_size_kb:.2f} KB',
+        'index_size': f'{index_size_gb:.2f} GB',
         'details': meta
     })
 

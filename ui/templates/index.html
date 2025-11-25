@@ -35,6 +35,12 @@
                 <h2>Step 2: Build Index</h2>
                 <p>Select the desired sparsity and build the index.</p>
                 <form id="index-form">
+                    <label for="index-field">Index Field (Optional):</label>
+                    <div class="input-with-btn">
+                        <textarea id="index-field" name="field" rows="1" placeholder="e.g., text_column"></textarea>
+                        <button type="button" class="preset-btn" data-target="index-field" data-value="abstract">Preset</button>
+                    </div>
+
                     <label for="sparsity-slider">Sparsity:</label>
                     <input type="range" id="sparsity-slider" name="sparsity" min="0" max="1" step="0.05" value="0.5">
                     <span id="sparsity-value">0.5</span>
@@ -53,7 +59,10 @@
                 <h2>Step 3: Run Query</h2>
                 <p>Enter a query using Pandas-like syntax to filter the data.</p>
                 <form id="query-form">
-                    <input type="text" id="query-input" name="query" placeholder="e.g., (sentiment == 'positive') & (audience == 'children')">
+                    <div class="input-with-btn">
+                        <textarea id="query-input" name="query" rows="3" placeholder="e.g., (sentiment == 'positive') & (audience == 'children')"></textarea>
+                        <button type="button" class="preset-btn" data-target="query-input" data-value="(sentiment == 'positive') & (audience == 'children')">Preset</button>
+                    </div>
                     <div class="button-group">
                         <button type="button" id="query-with-index">Run with Index</button>
                         <button type="button" id="query-without-index">Run without Index</button>

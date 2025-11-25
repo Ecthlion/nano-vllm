@@ -12,61 +12,120 @@ document.addEventListener('DOMContentLoaded', function() {
         sparsityValue.textContent = sparsitySlider.value;
     });
 
+    // Preset Buttons
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-target');
+            const value = btn.getAttribute('data-value');
+            const target = document.getElementById(targetId);
+            if (target) {
+                target.value = value;
+            }
+        });
+    });
+
     // --- Step 1: File Upload ---
     uploadForm.addEventListener('submit', function(e) {
         e.preventDefault();
-        const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
+        const file = fileInput.files[0];
+        if (!file) return;
 
         const progressBar = document.getElementById('upload-progress');
         const progressContainer = document.getElementById('upload-progress-container');
         const statusP = document.getElementById('upload-status');
 
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '0%';
-        statusP.textContent = 'Uploading...';
-
-        const xhr = new XMLHttpRequest();
-
-        xhr.upload.addEventListener('progress', function(e) {
-            if (e.lengthComputable) {
-                const percentComplete = (e.loaded / e.total) * 100;
-                progressBar.style.width = percentComplete + '%';
+        // Check if file exists
+        fetch('/check_file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: file.name })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.exists) {
+                // File exists, simulate upload
+                simulateUpload(data.filepath);
+            } else {
+                // File doesn't exist, proceed with upload
+                performUpload(file);
             }
+        })
+        .catch(error => {
+            console.error('Error checking file:', error);
+            statusP.textContent = `Error checking file: ${error.message}`;
+            statusP.style.color = 'red';
         });
 
-        xhr.onload = function() {
-            if (xhr.status === 200) {
-                const data = JSON.parse(xhr.responseText);
-                progressBar.style.width = '100%';
-                if (data.error) {
-                    statusP.textContent = `Error: ${data.error}`;
-                    statusP.style.color = 'red';
-                } else {
-                    statusP.textContent = `File uploaded successfully: ${fileInput.files[0].name}`;
+        function simulateUpload(filepath) {
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            statusP.textContent = 'Uploading...';
+
+            let width = 0;
+            const interval = setInterval(() => {
+                width += 5; // Fast simulation
+                progressBar.style.width = width + '%';
+                if (width >= 100) {
+                    clearInterval(interval);
+                    statusP.textContent = `File uploaded successfully: ${file.name}`;
                     statusP.style.color = 'green';
-                    uploadedFilepath = data.filepath;
-                    // document.getElementById('index-card').style.display = 'block'; // Already visible
+                    uploadedFilepath = filepath;
+                    document.getElementById('index-card').style.display = 'block';
                 }
-            } else {
-                statusP.textContent = `Error: ${xhr.statusText}`;
+            }, 20); // Fast interval
+        }
+
+        function performUpload(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            statusP.textContent = 'Uploading...';
+
+            const xhr = new XMLHttpRequest();
+
+            xhr.upload.addEventListener('progress', function(e) {
+                if (e.lengthComputable) {
+                    const percentComplete = (e.loaded / e.total) * 100;
+                    progressBar.style.width = percentComplete + '%';
+                }
+            });
+
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    const data = JSON.parse(xhr.responseText);
+                    progressBar.style.width = '100%';
+                    if (data.error) {
+                        statusP.textContent = `Error: ${data.error}`;
+                        statusP.style.color = 'red';
+                    } else {
+                        statusP.textContent = `File uploaded successfully: ${file.name}`;
+                        statusP.style.color = 'green';
+                        uploadedFilepath = data.filepath;
+                        document.getElementById('index-card').style.display = 'block';
+                    }
+                } else {
+                    statusP.textContent = `Error: ${xhr.statusText}`;
+                    statusP.style.color = 'red';
+                }
+            };
+
+            xhr.onerror = function() {
+                statusP.textContent = 'Upload failed.';
                 statusP.style.color = 'red';
-            }
-        };
+            };
 
-        xhr.onerror = function() {
-            statusP.textContent = 'Upload failed.';
-            statusP.style.color = 'red';
-        };
-
-        xhr.open('POST', '/upload', true);
-        xhr.send(formData);
+            xhr.open('POST', '/upload', true);
+            xhr.send(formData);
+        }
     });
 
     // --- Step 2: Build Index ---
     indexForm.addEventListener('submit', function(e) {
         e.preventDefault();
         const sparsity = sparsitySlider.value;
+        const field = document.getElementById('index-field').value;
 
         const progressBar = document.getElementById('index-progress');
         const progressContainer = document.getElementById('index-progress-container');
@@ -89,7 +148,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('/build_index', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filepath: uploadedFilepath, sparsity: sparsity })
+            body: JSON.stringify({ filepath: uploadedFilepath, sparsity: sparsity, field: field })
         })
         .then(response => response.json())
         .then(data => {
@@ -243,6 +302,11 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderTrace(traceData) {
         const container = document.getElementById('trace-container');
         container.innerHTML = '';
+
+        if (!traceData || !traceData.traceEvents || traceData.traceEvents.length === 0) {
+            container.innerHTML = '<p style="text-align:center; padding-top: 20px; color: #7f8c8d;">No trace data available.</p>';
+            return;
+        }
 
         const margin = { top: 20, right: 30, bottom: 30, left: 90 };
         const width = container.clientWidth - margin.left - margin.right;

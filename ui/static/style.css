@@ -3,19 +3,20 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     background-color: #f4f7f9;
     color: #333;
-    line-height: 1.6;
+    line-height: 1.4;
     margin: 0;
     height: 100vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    font-size: 14px;
 }
 
 /* Layout Styles */
 .navbar {
     background: #fff;
     border-bottom: 1px solid #e2e8f0;
-    padding: 15px 30px;
+    padding: 10px 20px;
     margin-bottom: 0;
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     flex-shrink: 0;
@@ -27,13 +28,13 @@ body {
 }
 
 .navbar h1 {
-    font-size: 2em;
+    font-size: 1.5em;
     color: #2c3e50;
-    margin: 0 0 5px 0;
+    margin: 0 0 2px 0;
 }
 
 .navbar p {
-    font-size: 1em;
+    font-size: 0.9em;
     color: #5a677d;
     margin: 0;
 }
@@ -42,17 +43,17 @@ body {
     display: flex;
     width: 100%;
     box-sizing: border-box;
-    gap: 25px;
-    padding: 20px;
+    gap: 15px;
+    padding: 15px;
     flex: 1;
     min-height: 0; /* Important for nested flex scrolling */
 }
 
 .sidebar {
-    flex: 0 0 350px;
+    flex: 0 0 300px;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 15px;
     overflow-y: auto;
     padding-right: 5px; /* Space for scrollbar */
 }
@@ -62,7 +63,7 @@ body {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 15px;
     overflow-y: auto;
     padding-right: 5px;
 }
@@ -71,41 +72,73 @@ body {
 .step-card {
     background: #ffffff;
     border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 20px;
+    border-radius: 6px;
+    padding: 15px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }
 
 .step-card h2 {
-    font-size: 1.8em;
+    font-size: 1.2em;
     color: #2c3e50;
     margin-top: 0;
-    margin-bottom: 15px;
+    margin-bottom: 10px;
     border-bottom: 2px solid #3498db;
-    padding-bottom: 10px;
+    padding-bottom: 5px;
     display: inline-block;
 }
 
 .step-card p {
     color: #5a677d;
-    margin-bottom: 20px;
+    margin-bottom: 10px;
+    font-size: 0.95em;
 }
 
 /* Forms and Inputs */
 form {
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 10px;
 }
 
 input[type="file"],
-input[type="text"] {
+input[type="text"],
+textarea {
     width: 100%;
-    padding: 12px;
+    padding: 8px;
     border: 1px solid #cbd5e0;
-    border-radius: 5px;
-    font-size: 1em;
+    border-radius: 4px;
+    font-size: 0.95em;
     box-sizing: border-box;
+    font-family: inherit;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 38px;
+}
+
+.input-with-btn {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.preset-btn {
+    background-color: #95a5a6;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    font-size: 0.9em;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    height: 38px; /* Match input height approx */
+    display: flex;
+    align-items: center;
+}
+
+.preset-btn:hover {
+    background-color: #7f8c8d;
 }
 
 input[type="range"] {
@@ -116,10 +149,10 @@ button, .button-group button {
     background-color: #3498db;
     color: white;
     border: none;
-    padding: 12px 20px;
-    font-size: 1em;
+    padding: 8px 15px;
+    font-size: 0.95em;
     font-weight: bold;
-    border-radius: 5px;
+    border-radius: 4px;
     cursor: pointer;
     transition: background-color 0.3s ease;
     text-align: center;
@@ -131,7 +164,7 @@ button:hover, .button-group button:hover {
 
 .button-group {
     display: flex;
-    gap: 10px;
+    gap: 8px;
 }
 
 #query-with-index {
@@ -153,34 +186,36 @@ button:hover, .button-group button:hover {
 .progress-bar-container {
     width: 100%;
     background-color: #e2e8f0;
-    border-radius: 5px;
-    margin-top: 15px;
+    border-radius: 4px;
+    margin-top: 10px;
     overflow: hidden;
 }
 
 .progress-bar {
     width: 0%;
-    height: 20px;
+    height: 15px;
     background-color: #2ecc71;
-    border-radius: 5px;
+    border-radius: 4px;
     transition: width 0.4s ease-in-out;
     text-align: center;
-    line-height: 20px;
+    line-height: 15px;
     color: white;
+    font-size: 0.8em;
 }
 
 /* Results Section */
 #results-info {
     background: #ecf0f1;
-    padding: 15px;
-    border-radius: 5px;
-    margin-bottom: 20px;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 15px;
 }
 
 #results-info p {
     margin: 0;
     font-weight: bold;
     color: #2c3e50;
+    font-size: 0.95em;
 }
 
 #results-table-container {
@@ -190,17 +225,18 @@ button:hover, .button-group button:hover {
 #results-table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 20px;
+    margin-top: 15px;
 }
 
 #results-table th, #results-table td {
     border: 1px solid #e2e8f0;
-    padding: 12px;
+    padding: 8px;
     text-align: left;
-    max-width: 200px;
+    max-width: 180px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: 0.9em;
 }
 
 #results-table th {
@@ -216,9 +252,9 @@ button:hover, .button-group button:hover {
 /* Trace Visualization */
 #trace-container {
     width: 100%;
-    height: 200px;
+    height: 150px;
     border: 1px solid #e2e8f0;
-    border-radius: 5px;
+    border-radius: 4px;
     margin-top: 10px;
     position: relative;
 }
