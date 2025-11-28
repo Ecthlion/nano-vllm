@@ -6,11 +6,70 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib import font_manager, ft2font  # type: ignore[import]
+
 import pandas as pd
-import plotly.graph_objects as go
 
 from nanovllm.llm import LLM
 from nanovllm.sampling_params import SamplingParams
+
+
+def _font_supports_chars(font_path: str, sample: str) -> bool:
+    try:
+        font = ft2font.FT2Font(font_path)
+    except OSError:
+        return False
+    charmap = font.get_charmap()
+    targets = {ord(char) for char in sample if char.strip()}
+    return targets.issubset(charmap.keys())
+
+
+def _configure_matplotlib_fonts() -> None:
+    sample_text = "使用索引未稀疏度查询构建结果漂移"
+    preferred_fonts = [
+        "Noto Sans CJK SC",
+        "Source Han Sans SC",
+        "Microsoft YaHei",
+        "PingFang SC",
+        "WenQuanYi Micro Hei",
+        "SimHei",
+    ]
+
+    def pick_font() -> tuple[str | None, str | None]:
+        for font_name in preferred_fonts:
+            try:
+                font_path = font_manager.findfont(font_name, fallback_to_default=False)
+            except ValueError:
+                continue
+            if font_path and _font_supports_chars(font_path, sample_text):
+                return font_name, font_path
+        for entry in font_manager.fontManager.ttflist:
+            font_path = getattr(entry, "fname", None)
+            if not font_path or not os.path.exists(font_path):
+                continue
+            try:
+                if _font_supports_chars(font_path, sample_text):
+                    font_name = getattr(entry, "name", None) or os.path.basename(font_path)
+                    return font_name, font_path
+            except OSError:
+                continue
+        return None, None
+
+    font_name, font_path = pick_font()
+    if font_name:
+        matplotlib.rcParams["font.family"] = [font_name, "sans-serif"]
+        matplotlib.rcParams["font.sans-serif"] = [font_name, "DejaVu Sans"]
+        print(f"[backend] Matplotlib will render charts using '{font_name}' ({font_path}).")
+    else:
+        print("[backend] Warning: No CJK-capable font found; charts may show missing glyphs.")
+    matplotlib.rcParams["axes.unicode_minus"] = False
+
+
+_configure_matplotlib_fonts()
 
 
 @dataclass
@@ -28,6 +87,13 @@ class BackendAPI:
         re.IGNORECASE,
     )
     TEMPLATE_PATTERN = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    PICS_DIR = os.path.join(PROJECT_ROOT, "pics")
+    CHART_FILES = {
+        "latency": "analytics_latency.png",
+        "recall": "analytics_recall.png",
+        "trace": "analytics_trace.png",
+    }
 
     def __init__(self) -> None:
         print("init backend")
@@ -41,6 +107,7 @@ class BackendAPI:
         self.current_sparsity: float | None = None
         self.index_limit: int | None = None
         self.analytics: dict[str, list[dict[str, Any]]] = {"indexes": [], "queries": []}
+        os.makedirs(self.PICS_DIR, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Data Loading & Indexing
@@ -134,6 +201,7 @@ class BackendAPI:
             **meta,
         })
         self.analytics["indexes"] = self.analytics["indexes"][-20:]
+        # self._update_charts()
 
     # ------------------------------------------------------------------
     # Query Execution
@@ -197,6 +265,7 @@ class BackendAPI:
             llm_metrics,
             filtered["__id"].tolist() if "__id" in filtered.columns else [],
         )
+        # self._update_charts()
 
         return {
             "results": results,
@@ -270,12 +339,14 @@ class BackendAPI:
                 series_data.append(prediction == normalized_expected)
 
         mask = pd.Series(series_data, index=order)
+        accuracy = sum(series_data) / len(series_data) if series_data else 0.0
         metrics = {
             "latency_s": latency,
             "transfer_ms": transfer_ms,
             "compute_ms": compute_ms,
             "use_index": effective_index,
             "prompt": clause.value,
+            "accuracy": accuracy,
         }
         return mask, metrics
 
@@ -406,6 +477,9 @@ class BackendAPI:
         result_ids: list[int],
     ) -> None:
         latency = sum(metric.get("latency_s", 0.0) for metric in llm_metrics)
+        accuracies = [m.get("accuracy", 0.0) for m in llm_metrics if "accuracy" in m]
+        avg_accuracy = sum(accuracies) / len(accuracies) if accuracies else None
+
         entry = {
             "timestamp": time.time(),
             "query": query,
@@ -416,6 +490,8 @@ class BackendAPI:
             "compute_ms": sum(m.get("compute_ms", 0.0) for m in llm_metrics),
             "result_ids": result_ids,
             "sparsity": self.current_sparsity,
+            "accuracy": avg_accuracy,
+            "llm_metrics": llm_metrics,  # Store detailed metrics for trace reconstruction
         }
         self.analytics["queries"].append(entry)
         self.analytics["queries"] = self.analytics["queries"][-50:]
@@ -424,6 +500,40 @@ class BackendAPI:
     # Analytics
     # ------------------------------------------------------------------
     def analyse(self, _data: Any | None = None) -> dict[str, Any]:
+        # Just return the current state and image URLs.
+        # Images are updated by _update_charts() called in query/build_index.
+        queries = self.analytics["queries"]
+        indexes = self.analytics["indexes"]
+        
+        summary = {
+            "index_builds": len(indexes),
+            "query_runs": len(queries),
+            "generated_at": int(time.time()),
+        }
+        
+        # Construct payload pointing to existing images
+        version = int(time.time())
+        images = {}
+        for key, filename in self.CHART_FILES.items():
+            # Check if file exists to set has_data flag roughly
+            filepath = os.path.join(self.PICS_DIR, filename)
+            has_data = os.path.exists(filepath)
+            images[key] = {
+                "url": f"/pics/{filename}",
+                "filename": filename,
+                "version": version,
+                "has_data": has_data,
+                "message": "" if has_data else "No data available yet.",
+                "alt": key.capitalize(),
+            }
+
+        return {
+            "images": images,
+            "summary": summary,
+            "metrics": {}, # Metrics are less important for the frontend now if images are pre-rendered
+        }
+
+    def _update_charts(self) -> None:
         queries = self.analytics["queries"]
         indexes = self.analytics["indexes"]
         latency_with = [q["latency_ms"] for q in queries if q.get("use_index")]
@@ -436,25 +546,19 @@ class BackendAPI:
             else 0,
         }
 
-        diff_points = []
-        grouped: dict[str, dict[bool, dict[str, Any]]] = {}
-        for entry in queries:
-            grouped.setdefault(entry["signature"], {})[bool(entry["use_index"])] = entry
-        for group in grouped.values():
-            if True in group and False in group:
-                idx_set = set(group[True]["result_ids"])
-                base_set = set(group[False]["result_ids"])
-                union = idx_set | base_set
-                if not union:
-                    continue
-                diff = 1 - (len(idx_set & base_set) / len(union))
-                diff_points.append(
-                    {
-                        "diff_ratio": diff,
-                        "sparsity": group[True].get("sparsity"),
-                        "query": group[True]["query"][:80],
-                    }
-                )
+        recall_map: dict[float, list[float]] = {}
+        for q in queries:
+            if q.get("accuracy") is not None and q.get("sparsity") is not None:
+                s = float(q["sparsity"])
+                acc = float(q["accuracy"])
+                if s not in recall_map:
+                    recall_map[s] = []
+                recall_map[s].append(acc)
+
+        recall_curve = []
+        for s in sorted(recall_map.keys()):
+            avg_acc = sum(recall_map[s]) / len(recall_map[s])
+            recall_curve.append({"sparsity": s, "recall": avg_acc})
 
         sparsity_curve = [
             {
@@ -465,239 +569,204 @@ class BackendAPI:
             for item in indexes
         ]
 
-        kv_timeline = [
-            {
-                "timestamp": q["timestamp"],
-                "transfer_ms": q.get("transfer_ms"),
-                "compute_ms": q.get("compute_ms"),
-                "use_index": q.get("use_index"),
-            }
-            for q in queries
-            if q.get("transfer_ms") or q.get("compute_ms")
-        ]
-        charts = self._build_plotly_figures(
+        last_query = queries[-1] if queries else None
+        trace_segments = []
+        if last_query:
+            metrics = last_query.get("llm_metrics", [])
+            current_time = 0.0
+            for m in metrics:
+                t = m.get("transfer_ms", 0.0)
+                c = m.get("compute_ms", 0.0)
+                if t > 0:
+                    trace_segments.append(("Transfer", current_time, t))
+                    current_time += t
+                if c > 0:
+                    trace_segments.append(("Compute", current_time, c))
+                    current_time += c
+
+        self._render_analytics_images(
             latency_bar=latency_bar,
-            diff_points=diff_points,
+            recall_curve=recall_curve,
             sparsity_curve=sparsity_curve,
-            kv_timeline=kv_timeline,
+            trace_segments=trace_segments,
         )
-        summary = {
-            "index_builds": len(indexes),
-            "query_runs": len(queries),
-            "generated_at": int(time.time()),
-        }
-        metrics = {
-            "latency_bar": latency_bar,
-            "diff_points": diff_points,
-            "sparsity_curve": sparsity_curve,
-            "kv_timeline": kv_timeline,
-        }
-        return {
-            "figures": charts,
-            "summary": summary,
-            "metrics": metrics,
-        }
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _build_plotly_figures(
+    def _render_analytics_images(
         self,
         *,
         latency_bar: dict[str, float],
-        diff_points: list[dict[str, Any]],
+        recall_curve: list[dict[str, float]],
         sparsity_curve: list[dict[str, Any]],
-        kv_timeline: list[dict[str, Any]],
+        trace_segments: list[tuple[str, float, float]],
     ) -> dict[str, dict[str, Any]]:
+        os.makedirs(self.PICS_DIR, exist_ok=True)
         version = int(time.time())
-        charts = {
+        statuses = {
             "latency": self._plot_latency_chart(latency_bar),
-            "diff": self._plot_diff_chart(diff_points),
+            "recall": self._plot_recall_chart(recall_curve),
             "sparsity": self._plot_sparsity_chart(sparsity_curve),
-            "kv": self._plot_kv_chart(kv_timeline),
+            "trace": self._plot_trace_chart(trace_segments),
         }
-        for meta in charts.values():
-            meta["version"] = version
-        return charts
+        payload: dict[str, dict[str, Any]] = {}
+        for key, status in statuses.items():
+            filename = self.CHART_FILES[key]
+            payload[key] = {
+                "url": f"/pics/{filename}",
+                "filename": filename,
+                "version": version,
+                "has_data": status.get("has_data", False),
+                "message": status.get("message", ""),
+                "alt": status.get("alt"),
+            }
+        return payload
 
-    def _base_chart_layout(self) -> dict[str, Any]:
-        return {
-            "margin": dict(l=48, r=20, t=36, b=48),
-            "template": "plotly_white",
-            "height": 320,
-            "plot_bgcolor": "#ffffff",
-            "paper_bgcolor": "rgba(0,0,0,0)",
-            "legend": dict(orientation="h", yanchor="bottom", y=1.02, x=0, xanchor="left"),
-        }
+    def _chart_path(self, key: str) -> str:
+        filename = self.CHART_FILES[key]
+        return os.path.join(self.PICS_DIR, filename)
+
+    def _finalize_chart(self, fig, filepath: str) -> None:
+        fig.tight_layout()
+        fig.savefig(filepath, dpi=160, bbox_inches="tight")
+        plt.close(fig)
+
+    def _draw_placeholder(self, ax, message: str) -> None:
+        ax.set_axis_off()
+        ax.text(
+            0.5,
+            0.5,
+            message,
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#475569",
+            wrap=True,
+        )
 
     def _plot_latency_chart(self, latency_bar: dict[str, float]) -> dict[str, Any]:
-        labels = ["使用索引", "未使用索引"]
+        fig, ax = plt.subplots(figsize=(5.5, 3.6))
+        labels = ["Indexed", "Baseline"]
         values = [float(latency_bar.get("with_index", 0)), float(latency_bar.get("without_index", 0))]
         has_data = any(value > 0 for value in values)
-        if not has_data:
-            return {
-                "has_data": False,
-                "message": "运行一次索引查询与一次基准查询以比较延迟。",
-                "title": "Latency Comparison",
-                "figure": None,
-            }
-        colors = ["#16a34a", "#f97316"]
-        fig = go.Figure(
-            data=[
-                go.Bar(
-                    x=labels,
-                    y=values,
-                    marker_color=colors,
-                    text=[f"{value:.1f} ms" for value in values],
-                    textposition="outside",
-                )
-            ]
-        )
-        fig.update_layout(
-            **self._base_chart_layout(),
-            yaxis_title="平均延迟 (ms)",
-            xaxis_title="",
-            bargap=0.4,
-        )
-        fig.update_yaxes(range=[0, max(values) * 1.25], showgrid=True, zeroline=False)
+        if has_data:
+            colors = ["#16a34a", "#f97316"]
+            ax.bar(labels, values, color=colors, alpha=0.9)
+            ax.set_ylabel("Avg Latency (ms)")
+            ax.set_title("Index vs Baseline")
+            for idx, value in enumerate(values):
+                ax.text(idx, value + max(values) * 0.02, f"{value:.1f}", ha="center", fontsize=11)
+        else:
+            self._draw_placeholder(ax, "Run one indexed and one baseline query to compare latency.")
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
+        self._finalize_chart(fig, self._chart_path("latency"))
         return {
-            "has_data": True,
-            "message": "索引与基准延迟对比。",
-            "title": "Latency Comparison",
-            "figure": fig.to_dict(),
+            "has_data": has_data,
+            "message": "Run one indexed and one baseline query to compare latency.",
+            "alt": "Latency comparison",
         }
 
-    def _plot_diff_chart(self, diff_points: list[dict[str, Any]]) -> dict[str, Any]:
-        if not diff_points:
-            return {
-                "has_data": False,
-                "message": "运行索引与非索引查询以比较结果漂移。",
-                "title": "Result Drift",
-                "figure": None,
-            }
-        xs = [max(0.0, min(1.0, float(point.get("diff_ratio") or 0))) for point in diff_points]
-        ys = [float(point.get("sparsity") or 0) for point in diff_points]
-        texts = [point.get("query", "") for point in diff_points]
-        fig = go.Figure(
-            data=[
-                go.Scatter(
-                    x=xs,
-                    y=ys,
-                    mode="markers",
-                    marker=dict(size=12, color="#f97316", line=dict(width=1, color="#c2410c"), opacity=0.85),
-                    hovertemplate="差异: %{x:.2f}<br>稀疏度: %{y:.2f}<br>查询: %{text}<extra></extra>",
-                    text=texts,
-                )
-            ]
-        )
-        fig.update_layout(
-            **self._base_chart_layout(),
-            xaxis=dict(title="结果差异比例", range=[0, 1], showgrid=True),
-            yaxis=dict(title="稀疏度", range=[0, max(1.0, max(ys + [0]))]),
-        )
+    def _plot_recall_chart(self, recall_curve: list[dict[str, float]]) -> dict[str, Any]:
+        fig, ax = plt.subplots(figsize=(5.5, 3.6))
+        if recall_curve:
+            xs = [item["sparsity"] for item in recall_curve]
+            ys = [item["recall"] for item in recall_curve]
+            ax.plot(xs, ys, marker="o", linestyle="-", color="#f97316", linewidth=2)
+            ax.set_xlabel("Sparsity")
+            ax.set_ylabel("Recall (Accuracy)")
+            ax.set_ylim(0, 1.05)
+            ax.set_xlim(0, 1.0)
+            ax.set_title("Sparsity vs Recall")
+            for x, y in zip(xs, ys):
+                ax.text(x, y + 0.02, f"{y:.2f}", ha="center", fontsize=9)
+        else:
+            self._draw_placeholder(ax, "Run queries with different sparsity to generate recall curve.")
+        ax.grid(True, linestyle="--", alpha=0.25)
+        self._finalize_chart(fig, self._chart_path("recall"))
         return {
-            "has_data": True,
-            "message": "索引与非索引结果漂移分布。",
-            "title": "Result Drift",
-            "figure": fig.to_dict(),
+            "has_data": bool(recall_curve),
+            "message": "Run queries with different sparsity to generate recall curve.",
+            "alt": "Recall vs Sparsity",
         }
 
     def _plot_sparsity_chart(self, sparsity_curve: list[dict[str, Any]]) -> dict[str, Any]:
-        points = [
-            (
-                datetime.fromtimestamp(item.get("timestamp", 0)),
-                float(item.get("sparsity") or 0),
-            )
-            for item in sparsity_curve
-            if item.get("timestamp")
-        ]
-        points.sort(key=lambda pair: pair[0])
-        if not points:
-            return {
-                "has_data": False,
-                "message": "构建至少一次索引以查看稀疏度趋势。",
-                "title": "Sparsity Timeline",
-                "figure": None,
-            }
-        xs = [p[0].isoformat() for p in points]
-        ys = [p[1] for p in points]
-        fig = go.Figure(
-            data=[
-                go.Scatter(
-                    x=xs,
-                    y=ys,
-                    mode="lines+markers",
-                    line=dict(color="#0f172a", width=3),
-                    marker=dict(size=8, color="#38bdf8"),
-                    hovertemplate="时间: %{x}<br>稀疏度: %{y:.2f}<extra></extra>",
+        fig, ax = plt.subplots(figsize=(5.5, 3.6))
+        if sparsity_curve:
+            points = [
+                (
+                    datetime.fromtimestamp(item.get("timestamp", 0)),
+                    float(item.get("sparsity") or 0),
                 )
+                for item in sparsity_curve
+                if item.get("timestamp")
             ]
-        )
-        fig.update_layout(
-            **self._base_chart_layout(),
-            xaxis=dict(title="构建时间"),
-            yaxis=dict(title="稀疏度", range=[0, 1], tickformat=".0%"),
-        )
+            points.sort(key=lambda pair: pair[0])
+            if points:
+                xs, ys = zip(*points)
+                ax.plot(xs, ys, color="#0f172a", linewidth=2.2, marker="o")
+                ax.set_ylim(0, 1)
+                ax.set_ylabel("Sparsity")
+                ax.set_xlabel("Build Time")
+                ax.set_title("Index Sparsity Trend")
+                fig.autofmt_xdate(rotation=20)
+            else:
+                self._draw_placeholder(ax, "Build at least one index to see sparsity trend.")
+        else:
+            self._draw_placeholder(ax, "Build at least one index to see sparsity trend.")
+        ax.grid(True, linestyle="--", alpha=0.25)
+        self._finalize_chart(fig, self._chart_path("sparsity"))
         return {
-            "has_data": True,
-            "message": "索引稀疏度随时间的演化。",
-            "title": "Sparsity Timeline",
-            "figure": fig.to_dict(),
+            "has_data": bool(sparsity_curve),
+            "message": "Build at least one index to see sparsity trend.",
+            "alt": "Sparsity timeline",
         }
 
-    def _plot_kv_chart(self, kv_timeline: list[dict[str, Any]]) -> dict[str, Any]:
-        rows = [
-            (
-                datetime.fromtimestamp(item.get("timestamp", 0)),
-                float(item.get("transfer_ms") or 0),
-                float(item.get("compute_ms") or 0),
-            )
-            for item in kv_timeline
-            if item.get("timestamp")
-        ]
-        rows.sort(key=lambda entry: entry[0])
-        if not rows:
-            return {
-                "has_data": False,
-                "message": "运行查询以收集 KV 传输与计算时间。",
-                "title": "KV Cache Timeline",
-                "figure": None,
-            }
-        xs = [row[0].isoformat() for row in rows]
-        transfer = [row[1] for row in rows]
-        compute = [row[2] for row in rows]
-        fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=xs,
-                y=transfer,
-                mode="lines+markers",
-                name="KV 传输",
-                line=dict(color="#2563eb", width=2.5),
-                marker=dict(size=7),
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=xs,
-                y=compute,
-                mode="lines+markers",
-                name="LLM 计算",
-                line=dict(color="#facc15", width=2.5),
-                marker=dict(size=7),
-            )
-        )
-        fig.update_layout(
-            **self._base_chart_layout(),
-            xaxis=dict(title="查询时间"),
-            yaxis=dict(title="时间 (ms)", rangemode="tozero"),
-            hovermode="x unified",
-        )
+    def _plot_trace_chart(self, trace_segments: list[tuple[str, float, float]]) -> dict[str, Any]:
+        fig, ax = plt.subplots(figsize=(5.5, 3.6))
+        if trace_segments:
+            transfers = [
+                (start, dur) for label, start, dur in trace_segments if label == "Transfer"
+            ]
+            computes = [
+                (start, dur) for label, start, dur in trace_segments if label == "Compute"
+            ]
+
+            if transfers:
+                ax.broken_barh(transfers, (10, 9), facecolors="#2563eb", label="Transfer")
+            if computes:
+                ax.broken_barh(computes, (20, 9), facecolors="#facc15", label="Compute")
+
+            ax.set_ylim(5, 35)
+            ax.set_yticks([14.5, 24.5])
+            ax.set_yticklabels(["Transfer", "Compute"])
+            ax.set_xlabel("Time (ms)")
+            ax.set_title("KV Transfer vs Compute Ratio (Last Query)")
+            ax.legend(loc="upper right")
+
+            total_transfer = sum(d for _, d in transfers)
+            total_compute = sum(d for _, d in computes)
+            total = total_transfer + total_compute
+            if total > 0:
+                ratio_text = f"Transfer: {total_transfer/total:.1%}\nCompute: {total_compute/total:.1%}"
+                ax.text(
+                    0.98,
+                    0.02,
+                    ratio_text,
+                    transform=ax.transAxes,
+                    ha="right",
+                    va="bottom",
+                    bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+                )
+
+        else:
+            self._draw_placeholder(ax, "Run a query to see KV transfer vs compute ratio.")
+        ax.grid(axis="x", linestyle="--", alpha=0.25)
+        self._finalize_chart(fig, self._chart_path("trace"))
         return {
-            "has_data": True,
-            "message": "KV 传输与计算耗时走势。",
-            "title": "KV Cache Timeline",
-            "figure": fig.to_dict(),
+            "has_data": bool(trace_segments),
+            "message": "Run a query to see KV transfer vs compute ratio.",
+            "alt": "Trace Gantt Chart",
         }
 
     def _ensure_data_loaded(self) -> None:

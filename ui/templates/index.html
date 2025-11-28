@@ -3,18 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nano-vLLM Demo</title>
+    <title>SemInfer</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>Nano-vLLM: Interactive Indexing & Querying</h1>
-            <p>Upload structured data, build an index with KV cache pruning, run hybrid queries, and inspect live analytics.</p>
-        </header>
-
         <div class="dashboard-grid">
-            <section class="workflow-panel">
+            <div class="sidebar-column">
                 <div class="steps-stack">
                     <!-- Step 1: File Upload -->
                     <div class="step-card" id="upload-card">
@@ -23,7 +18,7 @@
                         <form id="upload-form">
                             <input type="file" id="file-input" name="file" accept=".csv" required>
                             <button type="button" id="upload-trigger">Select &amp; Upload CSV</button>
-                            <p id="upload-selected" class="status-text muted">尚未选择文件</p>
+                            <p id="upload-selected" class="status-text muted">No file selected</p>
                         </form>
                         <div class="progress-bar-container" id="upload-progress-container" style="display: none;">
                             <div class="progress-bar" id="upload-progress"></div>
@@ -76,7 +71,9 @@
                         </div>
                     </div>
                 </div>
+            </div>
 
+            <div class="main-column">
                 <section class="results-section">
                     <div class="step-card" id="results-card" style="display: none;">
                         <h2>Query Results</h2>
@@ -91,80 +88,65 @@
                         <div id="trace-container"></div>
                     </div>
                 </section>
-            </section>
 
-            <section class="analytics-panel">
-                <div class="analytics-hero">
-                    <div class="analytics-header">
-                        <div>
-                            <h2>Analytics</h2>
+                <section class="analytics-panel">
+                    <div class="analytics-hero">
+                        <div class="analytics-header">
+                            <div>
+                                <h2>Analytics</h2>
                             <p class="analytics-subtitle">Server-side renderings that highlight latency, drift, sparsity and KV timelines at a glance.</p>
                         </div>
                         <span id="analytics-updated" class="analytics-updated">--</span>
                     </div>
                     <div class="analytics-summary" id="analytics-summary">
                         <div class="summary-chip">
-                            <span class="chip-label">索引构建</span>
+                            <span class="chip-label">Index Builds</span>
                             <span class="chip-value" id="summary-indexes">0</span>
                         </div>
                         <div class="summary-chip">
-                            <span class="chip-label">查询执行</span>
+                            <span class="chip-label">Query Runs</span>
                             <span class="chip-value" id="summary-queries">0</span>
                         </div>
                         <div class="summary-chip">
-                            <span class="chip-label">刷新状态</span>
-                            <span class="chip-value chip-status" id="analytics-status">待刷新</span>
+                            <span class="chip-label">Refresh Status</span>
+                            <span class="chip-value chip-status" id="analytics-status">Pending</span>
                         </div>
                     </div>
                     <div class="button-row analytics-row">
-                        <button type="button" id="analytics-btn">刷新 Analytics</button>
-                        <span id="analytics-hint" class="status-text muted">运行一次索引和查询后刷新以生成图表。</span>
+                        <button type="button" id="analytics-btn">Refresh Analytics</button>
+                        <span id="analytics-hint" class="status-text muted">Refresh after running an index and query to generate charts.</span>
                     </div>
                 </div>
                 <div id="analytics-empty" class="meta-panel" style="display: none;"></div>
                 <div class="chart-grid analytics-grid" id="analytics-grid">
-                    <figure class="chart-card analytics-figure" data-chart-key="latency" tabindex="0" role="button" aria-pressed="false">
+                    <figure class="chart-card analytics-figure" data-chart-key="trace">
                         <div class="chart-figure-body" data-state="empty">
-                            <div class="chart-plot" id="chart-plot-latency" role="img" aria-label="Latency comparison"></div>
-                            <p class="chart-fallback" data-default-message="运行索引和非索引查询后刷新查看延迟对比。">运行索引和非索引查询后刷新查看延迟对比。</p>
+                            <img id="chart-img-trace" alt="KV Transfer vs Compute" loading="lazy">
+                            <p class="chart-fallback" data-default-message="Run a query to see KV transfer vs compute ratio.">Run a query to see KV transfer vs compute ratio.</p>
+                        </div>
+                        <figcaption>KV Transfer vs Compute</figcaption>
+                    </figure>
+                    <figure class="chart-card analytics-figure" data-chart-key="latency">
+                        <div class="chart-figure-body" data-state="empty">
+                            <img id="chart-img-latency" alt="Latency comparison" loading="lazy">
+                            <p class="chart-fallback" data-default-message="Run indexed and non-indexed queries to compare latency.">Run indexed and non-indexed queries to compare latency.</p>
                         </div>
                         <figcaption>Latency Comparison</figcaption>
                     </figure>
-                    <figure class="chart-card analytics-figure" data-chart-key="diff" tabindex="0" role="button" aria-pressed="false">
+                    <figure class="chart-card analytics-figure" data-chart-key="recall">
                         <div class="chart-figure-body" data-state="empty">
-                            <div class="chart-plot" id="chart-plot-diff" role="img" aria-label="Result drift"></div>
-                            <p class="chart-fallback" data-default-message="运行索引与非索引查询来比较结果漂移。">运行索引与非索引查询来比较结果漂移。</p>
+                            <img id="chart-img-recall" alt="Recall vs Sparsity" loading="lazy">
+                            <p class="chart-fallback" data-default-message="Run queries with different sparsity to generate recall curve.">Run queries with different sparsity to generate recall curve.</p>
                         </div>
-                        <figcaption>Result Drift</figcaption>
-                    </figure>
-                    <figure class="chart-card analytics-figure" data-chart-key="sparsity" tabindex="0" role="button" aria-pressed="false">
-                        <div class="chart-figure-body" data-state="empty">
-                            <div class="chart-plot" id="chart-plot-sparsity" role="img" aria-label="Sparsity timeline"></div>
-                            <p class="chart-fallback" data-default-message="构建至少一次索引以查看稀疏度趋势。">构建至少一次索引以查看稀疏度趋势。</p>
-                        </div>
-                        <figcaption>Sparsity Timeline</figcaption>
-                    </figure>
-                    <figure class="chart-card analytics-figure" data-chart-key="kv" tabindex="0" role="button" aria-pressed="false">
-                        <div class="chart-figure-body" data-state="empty">
-                            <div class="chart-plot" id="chart-plot-kv" role="img" aria-label="KV cache timeline"></div>
-                            <p class="chart-fallback" data-default-message="运行查询以收集 KV 传输与计算时间。">运行查询以收集 KV 传输与计算时间。</p>
-                        </div>
-                        <figcaption>KV Cache Timeline</figcaption>
+                        <figcaption>Recall vs Sparsity</figcaption>
                     </figure>
                 </div>
             </section>
+            </div>
         </div>
     </div>
-    <div class="chart-lightbox" id="chart-lightbox" aria-hidden="true">
-        <div class="lightbox-backdrop" data-close="true"></div>
-        <div class="lightbox-content" role="dialog" aria-modal="true" aria-labelledby="lightbox-caption">
-            <button type="button" class="lightbox-close" aria-label="关闭" data-close="true">×</button>
-            <div class="lightbox-plot" id="lightbox-plot" role="img" aria-label="Analytics preview"></div>
-            <p id="lightbox-caption"></p>
-        </div>
-    </div>
+    <!-- Lightbox removed -->
     <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
