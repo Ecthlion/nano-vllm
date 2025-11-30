@@ -56,7 +56,6 @@ class LLMEngine:
             "total_compute_ms": 0.0,
             "num_batches": 0,
         }
-        self.last_run_stats: dict[str, float] | None = None
         atexit.register(self.exit)
         self.use_index = False
 
@@ -247,7 +246,6 @@ class LLMEngine:
     ) -> list[dict]:
         self.model_runner.sparsity = sparsity
         init_start = time()
-        self.last_run_stats = None
         self.use_index = self.use_index or use_index
         # Toggle pruning feature for this generation session
         # Propagate to model runner so it can prepare the runtime context.
@@ -294,13 +292,6 @@ class LLMEngine:
             pbar.close()  # type: ignore
         torch.cuda.synchronize()
         run_duration_ms = (perf_counter() - run_start) * 1000
-        self.last_run_stats = {
-            "avg_transfer_ms": 0.0,
-            "avg_compute_ms": run_duration_ms,
-            "num_batches": 0.0,
-            "use_index": use_index,
-            "runtime_ms": run_duration_ms,
-        }
         if use_index:
             total_xfer = self._stats["total_xfer_ms"]
             total_comp = self._stats["total_compute_ms"]
@@ -313,18 +304,6 @@ class LLMEngine:
                     "green",
                 )
             )
-            self.last_run_stats = {
-                "avg_transfer_ms": avg_xfer,
-                "avg_compute_ms": avg_comp,
-                "num_batches": float(nb),
-                "use_index": True,
-                "runtime_ms": run_duration_ms,
-            }
-            self._stats = {
-                "total_xfer_ms": 0.0,
-                "total_compute_ms": 0.0,
-                "num_batches": 0,
-            }
             # join background threads
             if self._prefetch_thread is not None:
                 self._prefetch_thread.join()

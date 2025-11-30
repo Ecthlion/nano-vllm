@@ -231,7 +231,7 @@ document.addEventListener('DOMContentLoaded', function() {
         renderPagination();
 
         // Display trace visualization
-        renderTrace(data.trace_data);
+        // renderTrace(data.trace_data);
     }
 
     function renderTable() {

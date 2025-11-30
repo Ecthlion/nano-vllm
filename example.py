@@ -71,8 +71,8 @@ def main():
     print(colored("\nBuild index / Warm up", "yellow"))
     base_prompt = " "
     # base_prompt = f'Given the above film review, answer whether the sentiment is "positive" or "negative". Respond ONLY with "positive" or "negative", in all lower case.\n'
-    samples, tast_str_len = dataset.sample(base_prompt, num_warmup)
-    sampling_params.task_str_len = tast_str_len
+    samples, task_str_len = dataset.sample(base_prompt, num_warmup)
+    sampling_params.task_str_len = task_str_len
 
     with profile(
         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
