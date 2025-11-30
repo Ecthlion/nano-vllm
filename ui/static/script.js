@@ -1,3 +1,4 @@
+
 document.addEventListener('DOMContentLoaded', function() {
     const uploadForm = document.getElementById('upload-form');
     const indexForm = document.getElementById('index-form');
@@ -231,7 +232,7 @@ document.addEventListener('DOMContentLoaded', function() {
         renderPagination();
 
         // Display trace visualization
-        // renderTrace(data.trace_data);
+        renderProfile(data.profile_data);
     }
 
     function renderTable() {
@@ -299,66 +300,111 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    function renderTrace(traceData) {
-        const container = document.getElementById('trace-container');
-        container.innerHTML = '';
-
-        if (!traceData || !traceData.traceEvents || traceData.traceEvents.length === 0) {
-            container.innerHTML = '<p style="text-align:center; padding-top: 20px; color: #7f8c8d;">No trace data available.</p>';
+    function renderProfile(profileData) {
+        const chartDom = document.getElementById('profile-chart');
+        let myChart = echarts.getInstanceByDom(chartDom);
+        if (myChart) {
+            myChart.dispose();
+        }
+        myChart = echarts.init(chartDom, null, {renderer: 'svg'});
+        
+        if (!profileData || profileData.length === 0) {
+            chartDom.innerHTML = '<p style="text-align:center; padding-top: 20px; color: #7f8c8d;">No profile data available.</p>';
             return;
         }
 
-        const margin = { top: 20, right: 30, bottom: 30, left: 90 };
-        const width = container.clientWidth - margin.left - margin.right;
-        const height = container.clientHeight - margin.top - margin.bottom;
+        const categories = ['Transfer', 'Compute'];
 
-        const svg = d3.select(container)
-            .append("svg")
-            .attr("width", width + margin.left + margin.right)
-            .attr("height", height + margin.top + margin.bottom)
-            .append("g")
-            .attr("transform", `translate(${margin.left},${margin.top})`);
+        function renderItem(params, api) {
+            var categoryIndex = api.value(0);
+            var start = api.coord([api.value(1), categoryIndex]);
+            var end = api.coord([api.value(2), categoryIndex]);
+            var height = api.size([0, 1])[1] * 0.6;
+            var rectShape = echarts.graphic.clipRectByRect(
+                {
+                    x: start[0],
+                    y: start[1] - height / 2,
+                    width: end[0] - start[0],
+                    height: height
+                },
+                {
+                    x: params.coordSys.x,
+                    y: params.coordSys.y,
+                    width: params.coordSys.width,
+                    height: params.coordSys.height
+                }
+            );
+            return (
+                rectShape && {
+                    type: 'rect',
+                    transition: ['shape'],
+                    shape: rectShape,
+                    style: api.style()
+                }
+            );
+        }
 
-        const events = traceData.traceEvents;
-        const tids = [...new Set(events.map(d => d.tid))];
+        const option = {
+            tooltip: {
+                formatter: function (params) {
+                    return params.marker + params.name + ': ' + params.value[3].toFixed(2) + ' ms';
+                }
+            },
+            title: {
+                text: 'Execution Profile',
+                left: 'center'
+            },
+            dataZoom: [
+                {
+                    type: 'slider',
+                    filterMode: 'weakFilter',
+                    showDataShadow: false,
+                    top: 350,
+                    labelFormatter: ''
+                },
+                {
+                    type: 'inside',
+                    filterMode: 'weakFilter'
+                }
+            ],
+            grid: {
+                height: 300,
+                top: 40
+            },
+            xAxis: {
+                min: 0,
+                scale: true,
+                axisLabel: {
+                    formatter: function (val) {
+                        return val + ' ms';
+                    }
+                }
+            },
+            yAxis: {
+                data: categories,
+                inverse: true
+            },
+            series: [
+                {
+                    type: 'custom',
+                    renderItem: renderItem,
+                    itemStyle: {
+                        opacity: 0.8
+                    },
+                    encode: {
+                        x: [1, 2],
+                        y: 0
+                    },
+                    data: profileData
+                }
+            ]
+        };
+
+        myChart.setOption(option);
         
-        const x = d3.scaleLinear()
-            .domain([0, d3.max(events, d => d.ts + d.dur)])
-            .range([0, width]);
-
-        const y = d3.scaleBand()
-            .domain(tids)
-            .range([0, height])
-            .padding(0.1);
-
-        const color = d3.scaleOrdinal(d3.schemeCategory10).domain(tids);
-
-        svg.append("g")
-            .attr("transform", `translate(0,${height})`)
-            .call(d3.axisBottom(x).ticks(width / 80).tickFormat(d => `${d/1000}ms`));
-
-        svg.append("g")
-            .call(d3.axisLeft(y).tickFormat(d => `Thread ${d}`));
-
-        svg.selectAll("rect")
-            .data(events)
-            .enter()
-            .append("rect")
-            .attr("x", d => x(d.ts))
-            .attr("y", d => y(d.tid))
-            .attr("width", d => x(d.dur))
-            .attr("height", y.bandwidth())
-            .attr("fill", d => color(d.tid));
-        
-        svg.selectAll(".text")
-            .data(events)
-            .enter()
-            .append("text")
-            .attr("x", d => x(d.ts) + 5)
-            .attr("y", d => y(d.tid) + y.bandwidth() / 2)
-            .attr("dy", ".35em")
-            .attr("fill", "white")
-            .style("font-size", "10px")
-            .text(d => d.name);
+        // Handle resize
+        window.addEventListener('resize', function() {
+            myChart.resize();
+        });
     }
 });

@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 
+from nanovllm.engine.model_runner import set_all_seeds
 from nanovllm.llm import LLM
 from nanovllm.sampling_params import SamplingParams
 
@@ -55,6 +56,18 @@ class BackendAPI:
         field = field or self.text_field
         if field is None or field not in self.data.columns:  # type: ignore[attr-defined]
             raise ValueError("Invalid text field for index building.")
+
+        if len(self.llm.kv_cache_index.kv_cache_index) != 0:
+            self.index_ready = True
+            self.text_field = field
+            self.current_sparsity = sparsity
+            self.index_limit = limit
+            return {
+                "field": field,
+                "rows_indexed": len(self.data) if limit is None else limit,  # type: ignore
+                "sparsity": sparsity,
+                "index_size_bytes": self._estimate_index_size(),
+            }
 
         # Reset KV cache index
         self.llm.kv_cache_index.kv_cache_index = {}
@@ -109,51 +122,61 @@ class BackendAPI:
     # Query Execution
     # ------------------------------------------------------------------
     def query(
-        self, query: str, use_index: bool, limit: int | None = 50
+        self, query: str, use_index: bool, limit: int | None = 1000
     ) -> dict[str, Any]:
         self._ensure_data_loaded()
         df = self.data.copy()  # type: ignore[assignment]
+        if limit is not None:
+            df = df.head(limit)
 
         # Parse query
         # Expected format: filter_expr and LLM('prompt') == 'target'
         # Example: sentiment == "positive" and LLM('Is this good?') == 'yes'
         try:
             filter_part, llm_part = query.split(" and LLM(", 1)
-            
-            # Use rfind to locate the closing parenthesis and operator, 
+
+            # Use rfind to locate the closing parenthesis and operator,
             # allowing quotes inside the prompt string.
             split_marker = ") == "
             split_idx = llm_part.rfind(split_marker)
-            
+
             if split_idx == -1:
-                 raise ValueError("Invalid format")
+                raise ValueError("Invalid format")
 
             prompt_part = llm_part[:split_idx].strip()
-            target_part = llm_part[split_idx + len(split_marker):].strip()
-            
+            target_part = llm_part[split_idx + len(split_marker) :].strip()
+
             # Remove outer quotes from prompt
-            if len(prompt_part) >= 2 and prompt_part[0] in ("'", '"') and prompt_part[0] == prompt_part[-1]:
+            if (
+                len(prompt_part) >= 2
+                and prompt_part[0] in ("'", '"')
+                and prompt_part[0] == prompt_part[-1]
+            ):
                 base_prompt = prompt_part[1:-1]
             else:
                 base_prompt = prompt_part.strip("'\"")
 
+            # Unescape newlines
+            base_prompt = base_prompt.replace('\\n', '\n')
+
             target_val = target_part.strip().strip("'\"")
-            
+
             df_filter = filter_part.strip()
         except ValueError:
-             return {"results": [], "metadata": {}, "error": "Invalid query format. Expected: filter and LLM('prompt') == 'target'"}
+            return {
+                "results": [],
+                "metadata": {},
+                "error": "Invalid query format. Expected: filter and LLM('prompt') == 'target'",
+            }
 
         # 1. Apply pandas filter
         try:
             df = df.query(df_filter)
         except Exception as e:
-             return {"results": [], "metadata": {}, "error": f"Pandas query error: {e}"}
-
-        if limit is not None:
-            df = df.head(limit)
+            return {"results": [], "metadata": {}, "error": f"Pandas query error: {e}"}
 
         if df.empty:
-             return {
+            return {
                 "results": [],
                 "metadata": {
                     "total_rows": len(self.data) if self.data is not None else 0,
@@ -162,14 +185,15 @@ class BackendAPI:
                     "text_field": self.text_field,
                     "limit": limit,
                 },
-                "inference_time": "0.0000 seconds"
+                "inference_time": "0.0000 seconds",
             }
 
-        # print(base_prompt)
-        # print(df_filter)
-        # print(target_val)
+        print(base_prompt)
+        print(df_filter)
+        print(target_val)
 
         # 2. Run LLM
+        set_all_seeds(42)
         start_time = time.perf_counter()
         effective_index = bool(use_index and self.index_ready)
         tuple_prompts: list[tuple[int, str]] = []
@@ -181,7 +205,7 @@ class BackendAPI:
                 str(row_dict.get(self.text_field, "")) if self.text_field else ""
             )
             full_prompt = f"{context_value}\n{base_prompt}"
-            
+
             tuple_prompts.append((int(idx), full_prompt))  # type: ignore
             order.append(idx)
 
@@ -199,17 +223,48 @@ class BackendAPI:
             pruning=False,
             sparsity=self.current_sparsity or 0.9,
         )
-        
+
         inference_time = time.perf_counter() - start_time
 
         # 3. Filter by LLM output
-        output_map = {idx: out.get("text", "").strip() for idx, out in zip(order, outputs)}
-        df["llm_output"] = df.index.map(output_map)
-        
-        # Filter where output matches target
-        df_final = df[df["llm_output"] == target_val]
+        output_map = {
+            idx: out.get("text", "").strip() for idx, out in zip(order, outputs)
+        }
 
-        results = df_final.to_dict(orient="records")
+        # Filter where output matches target
+        valid_indices = [idx for idx, text in output_map.items() if text == target_val]
+        df_final = df.loc[valid_indices]
+
+        results = df_final.to_dict(orient="records")  # type: ignore
+
+        # Process profile data from self.llm._analyse
+        profile_data = []
+        if hasattr(self.llm, "_analyse"):
+            # Normalize start time to 0
+            min_time = (
+                min([item["start_time"] for item in self.llm._analyse])
+                if self.llm._analyse
+                else 0
+            )
+
+            for item in self.llm._analyse:
+                # Categories: 0 for Transfer, 1 for Compute
+                category_index = 0 if item["is_transfer"] else 1
+                start = (item["start_time"] - min_time) * 1000  # ms
+                end = (item["end_time"] - min_time) * 1000  # ms
+                duration = end - start
+
+                profile_data.append(
+                    {
+                        "name": f"Batch {item['batch']}",
+                        "value": [category_index, start, end, duration],
+                        "itemStyle": {
+                            "normal": {
+                                "color": "#7b9ce1" if item["is_transfer"] else "#bd6d6c"
+                            }
+                        },
+                    }
+                )
 
         metadata = {
             "total_rows": len(self.data) if self.data is not None else 0,
@@ -223,6 +278,7 @@ class BackendAPI:
             "results": results,
             "metadata": metadata,
             "inference_time": f"{inference_time:.4f} seconds",
+            "profile_data": profile_data,
         }
 
     # ------------------------------------------------------------------

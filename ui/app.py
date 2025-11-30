@@ -67,7 +67,6 @@ def build_index():
     filepath = data.get('filepath')
     sparsity = data.get('sparsity')
     field = data.get('field')
-    limit = data.get('limit')
 
     if not filepath or not os.path.exists(filepath):
         return jsonify({'error': 'File not found'}), 400
@@ -77,8 +76,7 @@ def build_index():
         if backend.data_path != filepath:
             backend.load_data(filepath)
         sparsity_value = float(sparsity) if sparsity not in (None, '') else 0.9
-        limit_value = int(limit) if limit not in (None, '') else 1000
-        meta = backend.build_index(sparsity_value, field=field, limit=limit_value)
+        meta = backend.build_index(sparsity_value, field=field)
     except Exception as exc:
         return jsonify({'error': str(exc)}), 400
 
@@ -94,11 +92,9 @@ def query():
     data = request.get_json()
     query_str = data.get('query')
     use_index = data.get('use_index', False)
-    limit = data.get('limit')
 
     try:
-        limit_value = int(limit) if limit not in (None, '') else 50
-        response = backend.query(query_str or '', use_index=bool(use_index), limit=limit_value)
+        response = backend.query(query_str or '', use_index=bool(use_index))
     except Exception as exc:
         return jsonify({'error': str(exc)}), 400
 

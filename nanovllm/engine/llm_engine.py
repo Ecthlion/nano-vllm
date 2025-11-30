@@ -56,6 +56,15 @@ class LLMEngine:
             "total_compute_ms": 0.0,
             "num_batches": 0,
         }
+
+        # [{
+        #   "batch": 0,
+        #   "start_time": 0.0,
+        #   "end_time": 0.0,
+        #   "is_transfer": true,
+        # }]
+
+        self._analyse = []
         atexit.register(self.exit)
         self.use_index = False
 
@@ -69,7 +78,10 @@ class LLMEngine:
             p.join()
 
     def add_request(
-        self, prompt: str | list[int] | tuple[int, str], sampling_params: SamplingParams, use_index
+        self,
+        prompt: str | list[int] | tuple[int, str],
+        sampling_params: SamplingParams,
+        use_index,
     ):
         text_token_ids = []
         pruning_len = 0
@@ -85,8 +97,12 @@ class LLMEngine:
                     # print(f"[kept text]: { self.tokenizer.decode(text_token_ids) }")
                     pruning_len = item.get("pruning_len")  # type: ignore
                 else:
-                    text_token_ids = self.tokenizer.encode(prompt[1][:len(prompt[1])-sampling_params.task_str_len])
-                task_token_ids = self.tokenizer.encode(prompt[1][-sampling_params.task_str_len:])
+                    text_token_ids = self.tokenizer.encode(
+                        prompt[1][: len(prompt[1]) - sampling_params.task_str_len]
+                    )
+                task_token_ids = self.tokenizer.encode(
+                    prompt[1][-sampling_params.task_str_len :]
+                )
                 prompt = (text_id, text_token_ids + task_token_ids)
             else:
                 prompt = (prompt[0], self.tokenizer.encode(prompt[1]))
@@ -100,6 +116,7 @@ class LLMEngine:
 
         def _prefetch_loop():
             prefetch_stream = torch.cuda.Stream()
+            batch = 0
             while True:
                 # Try to fill GPU blocks as much as possible by scheduling
                 try:
@@ -133,7 +150,18 @@ class LLMEngine:
                     transfer_event.synchronize()
                     if start_event is not None:
                         xfer_ms = start_event.elapsed_time(transfer_event)
+                
+                end_time = time()
                 # Enqueue ready batch for compute
+                self._analyse.append(
+                    {
+                        "batch": batch,
+                        "start_time": end_time - (xfer_ms / 1000),
+                        "end_time": end_time,
+                        "is_transfer": True,
+                    }
+                )
+                batch += 1
                 self._prefetch_queue.put((seqs, is_prefill, xfer_ms))
 
             print(colored("prefetch thread quit!", "red"))
@@ -211,10 +239,19 @@ class LLMEngine:
         end = time()
         compute_ms = (end - start) * 1000
 
+        self._analyse.append(
+            {
+                "batch": self._stats["num_batches"],
+                "start_time": start,
+                "end_time": end,
+                "is_transfer": False,
+            }
+        )
+
         if use_index:
             for seq in seqs:
                 seq.lock_block = True
-            assert(len(seqs) > 0 )
+            assert len(seqs) > 0
             self._store_queue.put_nowait(seqs)  # type: ignore
 
         self.scheduler.postprocess(seqs, token_ids)
@@ -244,6 +281,7 @@ class LLMEngine:
         pruning: bool = False,
         sparsity: float = 0.9,
     ) -> list[dict]:
+        self._analyse = []
         self.model_runner.sparsity = sparsity
         init_start = time()
         self.use_index = self.use_index or use_index
@@ -264,8 +302,9 @@ class LLMEngine:
         prefill_throughput = decode_throughput = 0.0
         end = time()
         print(f"init: {end - init_start}")
-        run_start = perf_counter()
-        while not self.is_finished() or (use_index and not self._prefetch_queue.empty()):
+        while not self.is_finished() or (
+            use_index and not self._prefetch_queue.empty()
+        ):
             t = perf_counter()
             output, num_tokens = self.step(use_index)
             if use_tqdm:
@@ -273,7 +312,7 @@ class LLMEngine:
                     prefill_throughput = num_tokens / (perf_counter() - t)
                 else:
                     decode_throughput = -num_tokens / (perf_counter() - t)
-                pbar.set_postfix( # type: ignore
+                pbar.set_postfix(  # type: ignore
                     {  # type: ignore
                         "Prefill": f"{int(prefill_throughput)}tok/s",
                         "Decode": f"{int(decode_throughput)}tok/s",
@@ -291,7 +330,6 @@ class LLMEngine:
         if use_tqdm:
             pbar.close()  # type: ignore
         torch.cuda.synchronize()
-        run_duration_ms = (perf_counter() - run_start) * 1000
         if use_index:
             total_xfer = self._stats["total_xfer_ms"]
             total_comp = self._stats["total_compute_ms"]
@@ -304,6 +342,11 @@ class LLMEngine:
                     "green",
                 )
             )
+            self._stats = {
+                "total_xfer_ms": 0.0,
+                "total_compute_ms": 0.0,
+                "num_batches": 0,
+            }
             # join background threads
             if self._prefetch_thread is not None:
                 self._prefetch_thread.join()
