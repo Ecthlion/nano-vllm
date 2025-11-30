@@ -114,22 +114,63 @@ class BackendAPI:
         self._ensure_data_loaded()
         df = self.data.copy()  # type: ignore[assignment]
 
+        # Parse query
+        # Expected format: filter_expr and LLM('prompt') == 'target'
+        # Example: sentiment == "positive" and LLM('Is this good?') == 'yes'
+        try:
+            filter_part, llm_part = query.split(" and LLM(", 1)
+            
+            # Use rfind to locate the closing parenthesis and operator, 
+            # allowing quotes inside the prompt string.
+            split_marker = ") == "
+            split_idx = llm_part.rfind(split_marker)
+            
+            if split_idx == -1:
+                 raise ValueError("Invalid format")
+
+            prompt_part = llm_part[:split_idx].strip()
+            target_part = llm_part[split_idx + len(split_marker):].strip()
+            
+            # Remove outer quotes from prompt
+            if len(prompt_part) >= 2 and prompt_part[0] in ("'", '"') and prompt_part[0] == prompt_part[-1]:
+                base_prompt = prompt_part[1:-1]
+            else:
+                base_prompt = prompt_part.strip("'\"")
+
+            target_val = target_part.strip().strip("'\"")
+            
+            df_filter = filter_part.strip()
+        except ValueError:
+             return {"results": [], "metadata": {}, "error": "Invalid query format. Expected: filter and LLM('prompt') == 'target'"}
+
+        # 1. Apply pandas filter
+        try:
+            df = df.query(df_filter)
+        except Exception as e:
+             return {"results": [], "metadata": {}, "error": f"Pandas query error: {e}"}
+
         if limit is not None:
             df = df.head(limit)
 
-        # Query example:
-        # sentiment == "positive" and LLM('Given the above film review, answer whether it contains names. Respond ONLY with \"yes\" or \"no\", in all lower case.\n') == 'yes'
+        if df.empty:
+             return {
+                "results": [],
+                "metadata": {
+                    "total_rows": len(self.data) if self.data is not None else 0,
+                    "returned_rows": 0,
+                    "use_index": False,
+                    "text_field": self.text_field,
+                    "limit": limit,
+                },
+                "inference_time": "0.0000 seconds"
+            }
 
-        # Simplify parser, this is a example, you should correct the logic
-        # don't consider any other situation
+        # print(base_prompt)
+        # print(df_filter)
+        # print(target_val)
 
-        df_filter = 'sentiment=="positive"'  # only get filter before 'and'
-        base_prompt = 'Given the above film review, answer whether it contains names. Respond ONLY with "yes" or "no", in all lower case.\n'  # only get base_prompt inside LLM('')
-        target = "yes"  # only get target after LLM('') ==
-
-        df = df.query(df_filter)
-        self.base_sampling.task_str_len = len(base_prompt)
-
+        # 2. Run LLM
+        start_time = time.perf_counter()
         effective_index = bool(use_index and self.index_ready)
         tuple_prompts: list[tuple[int, str]] = []
         order: list[Any] = []
@@ -140,27 +181,39 @@ class BackendAPI:
                 str(row_dict.get(self.text_field, "")) if self.text_field else ""
             )
             full_prompt = f"{context_value}\n{base_prompt}"
-
-            tuple_prompts.append((idx, full_prompt))  # type: ignore
+            
+            tuple_prompts.append((int(idx), full_prompt))  # type: ignore
             order.append(idx)
+
+        sp = SamplingParams(
+            temperature=self.base_sampling.temperature,
+            max_tokens=self.base_sampling.max_tokens,
+        )
+        sp.task_str_len = len(base_prompt)
 
         outputs = self.llm.generate(
             tuple_prompts,
-            self.base_sampling,
+            sp,
             use_index=effective_index,
             use_tqdm=False,
             pruning=False,
             sparsity=self.current_sparsity or 0.9,
         )
+        
+        inference_time = time.perf_counter() - start_time
 
-        # FIX: should filter according to the target
-        output_map = {idx: out.get("text", "") for idx, out in zip(order, outputs)}
+        # 3. Filter by LLM output
+        output_map = {idx: out.get("text", "").strip() for idx, out in zip(order, outputs)}
         df["llm_output"] = df.index.map(output_map)
-        results = df.to_dict(orient="records")
+        
+        # Filter where output matches target
+        df_final = df[df["llm_output"] == target_val]
+
+        results = df_final.to_dict(orient="records")
 
         metadata = {
             "total_rows": len(self.data) if self.data is not None else 0,
-            "returned_rows": len(df),
+            "returned_rows": len(df_final),
             "use_index": effective_index,
             "text_field": self.text_field,
             "limit": limit,
@@ -169,6 +222,7 @@ class BackendAPI:
         return {
             "results": results,
             "metadata": metadata,
+            "inference_time": f"{inference_time:.4f} seconds",
         }
 
     # ------------------------------------------------------------------
