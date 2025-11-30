@@ -171,7 +171,52 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Step 3: Query ---
     document.getElementById('query-with-index').addEventListener('click', () => runQuery(true));
-    document.getElementById('query-without-index').addEventListener('click', () => runQuery(false));
+    document.getElementById('analyse-btn').addEventListener('click', runAnalyse);
+
+    function runAnalyse() {
+        const query = document.getElementById('query-input').value;
+        if (!query) {
+            alert('Please enter a query.');
+            return;
+        }
+
+        const progressBar = document.getElementById('query-progress');
+        const progressContainer = document.getElementById('query-progress-container');
+        
+        progressContainer.style.display = 'block';
+        progressBar.style.width = '0%';
+        document.getElementById('results-card').style.display = 'none';
+
+        // Simulate progress
+        let width = 0;
+        const interval = setInterval(() => {
+            width += 5;
+            progressBar.style.width = width + '%';
+            if (width >= 100) {
+                clearInterval(interval);
+            }
+        }, 500);
+
+        fetch('/analyse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: query })
+        })
+        .then(response => response.json())
+        .then(data => {
+            clearInterval(interval);
+            progressBar.style.width = '100%';
+            if (data.error) {
+                alert(`Error: ${data.error}`);
+            } else {
+                displayAnalyseResults(data);
+            }
+        })
+        .catch(error => {
+            clearInterval(interval);
+            alert(`Error: ${error.message}`);
+        });
+    }
 
     function runQuery(useIndex) {
         const query = document.getElementById('query-input').value;
@@ -221,6 +266,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function displayResults(data) {
         document.getElementById('results-card').style.display = 'block';
+        document.getElementById('results-info').style.display = 'block';
+        document.getElementById('results-table-container').style.display = 'block';
+        document.getElementById('profile-chart').style.display = 'block';
+        document.getElementById('analyse-chart').style.display = 'none';
         
         // Display inference time
         document.getElementById('inference-time').textContent = data.inference_time;
@@ -233,6 +282,83 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Display trace visualization
         renderProfile(data.profile_data);
+    }
+
+    function displayAnalyseResults(data) {
+        document.getElementById('results-card').style.display = 'block';
+        document.getElementById('results-info').style.display = 'none';
+        document.getElementById('results-table-container').style.display = 'none';
+        document.getElementById('pagination-controls').style.display = 'none';
+        document.getElementById('profile-chart').style.display = 'none';
+        
+        const analyseChart = document.getElementById('analyse-chart');
+        analyseChart.style.display = 'block';
+        
+        renderAnalyseChart(data.series);
+    }
+
+    function renderAnalyseChart(seriesData) {
+        const chartDom = document.getElementById('analyse-chart');
+        let myChart = echarts.getInstanceByDom(chartDom);
+        if (myChart) {
+            myChart.dispose();
+        }
+        myChart = echarts.init(chartDom, null, {renderer: 'svg'});
+
+        const option = {
+            title: {
+                text: 'Inference Time Comparison',
+                left: 'center'
+            },
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: {
+                    type: 'shadow'
+                }
+            },
+            grid: {
+                left: '3%',
+                right: '4%',
+                bottom: '3%',
+                containLabel: true
+            },
+            xAxis: {
+                type: 'category',
+                data: seriesData.map(item => item.name),
+                axisTick: {
+                    alignWithLabel: true
+                }
+            },
+            yAxis: {
+                type: 'value',
+                name: 'Time (s)'
+            },
+            series: [
+                {
+                    name: 'Time',
+                    type: 'bar',
+                    barWidth: '60%',
+                    data: seriesData.map(item => item.value),
+                    itemStyle: {
+                        color: function(params) {
+                            const colors = ['#5470c6', '#91cc75', '#fac858'];
+                            return colors[params.dataIndex % colors.length];
+                        }
+                    },
+                    label: {
+                        show: true,
+                        position: 'top',
+                        formatter: '{c} s'
+                    }
+                }
+            ]
+        };
+
+        myChart.setOption(option);
+        
+        window.addEventListener('resize', function() {
+            myChart.resize();
+        });
     }
 
     function renderTable() {
@@ -313,7 +439,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const categories = ['Transfer', 'Compute'];
+        const categories = ['Transfer', 'Inference'];
 
         function renderItem(params, api) {
             var categoryIndex = api.value(0);

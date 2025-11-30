@@ -100,10 +100,17 @@ def query():
 
     return jsonify(response)
 
-
-@app.route('/analytics', methods=['GET'])
-def analytics():
-    return jsonify(backend.analyse())
+@app.route('/analyse', methods=['POST'])
+def analyse():
+    data = request.get_json()
+    query_str = data.get('query')
+    
+    try:
+        response = backend.analyse(query_str or '')
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
+        
+    return jsonify(response)
 
 if __name__ == '__main__':
     app.run(debug=True, port=2026, use_reloader=False)

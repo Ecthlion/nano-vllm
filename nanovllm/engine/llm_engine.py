@@ -46,6 +46,9 @@ class LLMEngine:
         self._prefetch_queue: Queue
         self._cancel_prefetch = threading.Event()
 
+        # for not optimize
+        self._prefetch_stream = torch.cuda.Stream()
+
         # Store machinery
         self._store_thread: threading.Thread
         self._store_queue: Queue
@@ -213,22 +216,47 @@ class LLMEngine:
         )
         self._store_thread.start()
 
-    def step(self, use_index):
+    def step(self, use_index, optimize):
         xfer_ms = 0.0
         if use_index:
-            # Pop a ready batch (blocks until available or sentinel)
-            try:
-                # item = self._prefetch_queue.get_nowait()
-                item = self._prefetch_queue.get()
-            except Empty:
-                self._cancel_prefetch.set()
-                item = self._prefetch_queue.get()
+            if optimize:
+                # Pop a ready batch (blocks until available or sentinel)
+                try:
+                    # item = self._prefetch_queue.get_nowait()
+                    item = self._prefetch_queue.get()
+                except Empty:
+                    self._cancel_prefetch.set()
+                    item = self._prefetch_queue.get()
 
-            # backward-compat if queue carries 2-tuple
-            seqs, is_prefill, xfer_ms = item
-            if not seqs and self.scheduler.is_finished():
-                return [], 0
-            print(colored(f"schedule {len(seqs)} seq", "magenta"))
+                # backward-compat if queue carries 2-tuple
+                seqs, is_prefill, xfer_ms = item
+                if not seqs and self.scheduler.is_finished():
+                    return [], 0
+                print(colored(f"schedule {len(seqs)} seq", "magenta"))
+            else:
+                seqs, is_prefill = self.scheduler.schedule()
+                transfer_event = None
+                xfer_ms = 0.0
+                with record_function("get kv index"):
+                    ret = self.kv_cache_index.get_kv_cache(
+                        seqs,
+                        stream=self._prefetch_stream,  # type: ignore
+                        return_timing=True,
+                        cancel_event=self._cancel_prefetch,
+                    )
+
+                if self._cancel_prefetch.is_set():
+                    self._cancel_prefetch.clear()
+
+                if ret is not None:
+                    if isinstance(ret, tuple):
+                        transfer_event, start_event = ret
+                    else:
+                        transfer_event, start_event = ret, None
+                    transfer_event.synchronize()
+                    if start_event is not None:
+                        xfer_ms = start_event.elapsed_time(transfer_event)
+                print(colored(f"schedule {len(seqs)} seq", "magenta"))
         else:
             seqs, is_prefill = self.scheduler.schedule()
             print(colored(f"schedule {len(seqs)} seq", "magenta"))
@@ -280,6 +308,7 @@ class LLMEngine:
         use_index: bool = False,
         pruning: bool = False,
         sparsity: float = 0.9,
+        optimize: bool = True,
     ) -> list[dict]:
         self._analyse = []
         self.model_runner.sparsity = sparsity
@@ -296,7 +325,8 @@ class LLMEngine:
             self.add_request(prompt, sp, use_index)
         if use_index:
             # Start prefetch worker once requests are queued
-            self._start_prefetcher()
+            if optimize:
+                self._start_prefetcher()
             self._start_storer()
         outputs = {}
         prefill_throughput = decode_throughput = 0.0
@@ -306,7 +336,7 @@ class LLMEngine:
             use_index and not self._prefetch_queue.empty()
         ):
             t = perf_counter()
-            output, num_tokens = self.step(use_index)
+            output, num_tokens = self.step(use_index, optimize)
             if use_tqdm:
                 if num_tokens > 0:
                     prefill_throughput = num_tokens / (perf_counter() - t)

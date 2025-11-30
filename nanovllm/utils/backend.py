@@ -51,23 +51,24 @@ class BackendAPI:
         sparsity: float,
         field: str | None = None,
         limit: int | None = 1000,
+        no_pruning=False,
     ) -> dict[str, Any]:
         self._ensure_data_loaded()
         field = field or self.text_field
         if field is None or field not in self.data.columns:  # type: ignore[attr-defined]
             raise ValueError("Invalid text field for index building.")
 
-        if len(self.llm.kv_cache_index.kv_cache_index) != 0:
-            self.index_ready = True
-            self.text_field = field
-            self.current_sparsity = sparsity
-            self.index_limit = limit
-            return {
-                "field": field,
-                "rows_indexed": len(self.data) if limit is None else limit,  # type: ignore
-                "sparsity": sparsity,
-                "index_size_bytes": self._estimate_index_size(),
-            }
+        # if len(self.llm.kv_cache_index.kv_cache_index) != 0:
+        #     self.index_ready = True
+        #     self.text_field = field
+        #     self.current_sparsity = sparsity
+        #     self.index_limit = limit
+        #     return {
+        #         "field": field,
+        #         "rows_indexed": len(self.data) if limit is None else limit,  # type: ignore
+        #         "sparsity": sparsity,
+        #         "index_size_bytes": self._estimate_index_size(),
+        #     }
 
         # Reset KV cache index
         self.llm.kv_cache_index.kv_cache_index = {}
@@ -93,7 +94,7 @@ class BackendAPI:
             sp,
             use_index=True,
             use_tqdm=False,
-            pruning=True,
+            pruning=not no_pruning,
             sparsity=sparsity,
         )
 
@@ -118,6 +119,37 @@ class BackendAPI:
                 total += int(kv_tensor.nelement()) * int(kv_tensor.element_size())  # type: ignore[attr-defined]
         return total
 
+    def _parse_query(self, query: str):
+        filter_part, llm_part = query.split(" and LLM(", 1)
+
+        # Use rfind to locate the closing parenthesis and operator,
+        # allowing quotes inside the prompt string.
+        split_marker = ") == "
+        split_idx = llm_part.rfind(split_marker)
+
+        if split_idx == -1:
+            raise ValueError("Invalid format")
+
+        prompt_part = llm_part[:split_idx].strip()
+        target_part = llm_part[split_idx + len(split_marker) :].strip()
+
+        # Remove outer quotes from prompt
+        if (
+            len(prompt_part) >= 2
+            and prompt_part[0] in ("'", '"')
+            and prompt_part[0] == prompt_part[-1]
+        ):
+            base_prompt = prompt_part[1:-1]
+        else:
+            base_prompt = prompt_part.strip("'\"")
+
+        # Unescape newlines
+        base_prompt = base_prompt.replace("\\n", "\n")
+        target_val = target_part.strip().strip("'\"")
+        df_filter = filter_part.strip()
+
+        return df_filter, base_prompt, target_val
+
     # ------------------------------------------------------------------
     # Query Execution
     # ------------------------------------------------------------------
@@ -133,35 +165,7 @@ class BackendAPI:
         # Expected format: filter_expr and LLM('prompt') == 'target'
         # Example: sentiment == "positive" and LLM('Is this good?') == 'yes'
         try:
-            filter_part, llm_part = query.split(" and LLM(", 1)
-
-            # Use rfind to locate the closing parenthesis and operator,
-            # allowing quotes inside the prompt string.
-            split_marker = ") == "
-            split_idx = llm_part.rfind(split_marker)
-
-            if split_idx == -1:
-                raise ValueError("Invalid format")
-
-            prompt_part = llm_part[:split_idx].strip()
-            target_part = llm_part[split_idx + len(split_marker) :].strip()
-
-            # Remove outer quotes from prompt
-            if (
-                len(prompt_part) >= 2
-                and prompt_part[0] in ("'", '"')
-                and prompt_part[0] == prompt_part[-1]
-            ):
-                base_prompt = prompt_part[1:-1]
-            else:
-                base_prompt = prompt_part.strip("'\"")
-
-            # Unescape newlines
-            base_prompt = base_prompt.replace('\\n', '\n')
-
-            target_val = target_part.strip().strip("'\"")
-
-            df_filter = filter_part.strip()
+            df_filter, base_prompt, target_val = self._parse_query(query)
         except ValueError:
             return {
                 "results": [],
@@ -280,6 +284,106 @@ class BackendAPI:
             "inference_time": f"{inference_time:.4f} seconds",
             "profile_data": profile_data,
         }
+
+    def analyse(self, query: str, limit: int | None = 1000) -> dict[str, Any]:
+        self._ensure_data_loaded()
+        df = self.data.copy()  # type: ignore[assignment]
+        if limit is not None:
+            df = df.head(limit)
+
+        # Parse query (same as query method)
+        try:
+            df_filter, base_prompt, target_val = self._parse_query(query)
+        except ValueError:
+            return {
+                "error": "Invalid query format. Expected: filter and LLM('prompt') == 'target'",
+            }
+
+        # Apply pandas filter
+        start = time.time()
+        try:
+            df = df.query(df_filter)
+        except Exception as e:
+            return {"error": f"Pandas query error: {e}"}
+
+        if df.empty:
+            return {"error": "Query returned no data"}
+        end = time.time()
+        print(f"df filter time: {( end - start ):.2f} s")
+
+        # Prepare prompts
+        tuple_prompts: list[tuple[int, str]] = []
+        for idx, row in df.iterrows():
+            row_dict = row.to_dict()
+            context_value = (
+                str(row_dict.get(self.text_field, "")) if self.text_field else ""
+            )
+            full_prompt = f"{context_value}\n{base_prompt}"
+            tuple_prompts.append((int(idx), full_prompt))  # type: ignore
+
+        sp = SamplingParams(
+            temperature=self.base_sampling.temperature,
+            max_tokens=self.base_sampling.max_tokens,
+        )
+        sp.task_str_len = len(base_prompt)
+
+        results = []
+
+        # Run 1: No Index
+        print("=========No Index==========")
+        set_all_seeds(42)
+        start_time = time.perf_counter()
+        self.llm.generate(
+            tuple_prompts,
+            sp,
+            use_index=False,
+            use_tqdm=False,
+            pruning=False,
+            sparsity=0.9,
+            optimize=False,
+        )
+        time_no_index = time.perf_counter() - start_time
+        results.append({"name": "No Index", "value": time_no_index})
+        print(f"========={time_no_index:.2f}s==========")
+
+        # Run 2: Pruned Index (Async/Optimize=True)
+        print("=========Pruned Index==========")
+        set_all_seeds(42)
+        start_time = time.perf_counter()
+        self.llm.generate(
+            tuple_prompts,
+            sp,
+            use_index=True,
+            use_tqdm=False,
+            pruning=True,
+            sparsity=self.current_sparsity or 0.9,
+            optimize=True,
+        )
+        time_pruned = time.perf_counter() - start_time
+        results.append({"name": "Pruned Index", "value": time_pruned})
+        print(f"========={time_pruned:.2f}s==========")
+
+        # Run 3: Full Index (Sync/Optimize=False)
+        print("=========Full Index==========")
+        self.build_index(
+            self.current_sparsity, self.text_field, limit, True  # type: ignore
+        )
+        set_all_seeds(42)
+        start_time = time.perf_counter()
+        self.llm.generate(
+            tuple_prompts,
+            sp,
+            use_index=True,
+            use_tqdm=False,
+            pruning=False,
+            sparsity=self.current_sparsity or 0.9,
+            optimize=False,
+        )
+        time_full = time.perf_counter() - start_time
+        results.append({"name": "Full Index", "value": time_full})
+        print(f"========={time_full:.2f}s==========")
+
+        return {"series": results}
 
     # ------------------------------------------------------------------
     # Helpers
