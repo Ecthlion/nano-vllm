@@ -89,34 +89,36 @@ def main():
     print(colored(f"Build index time: {(end - start):.4f} s", "blue"))
 
     # remove prefix cache
-    # llm.scheduler.block_manager.reset()
+    llm.scheduler.block_manager.reset()
 
     ###################################################################
     # print(colored("Task1: suitable for kids", "yellow"))
-    #
-    # base_prompt = f'Given the above film review, answer whether the film is suitable for kids. Respond ONLY with "yes" or "no", in all lower case.\n'
-    # samples, base_token_len = dataset.sample(base_prompt, 20)
-    # sampling_params.base_token_len = base_token_len
-    #
-    # # The first task will generate kv cache index for texts
-    # # with profile(
-    # #     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-    # #     profile_memory=True,
-    # #     with_stack=True,
-    # # ) as prof:
-    # start = time()
-    # outputs = llm.generate(samples, sampling_params, use_index=True, use_tqdm=False)
-    # end = time()
-    # # prof.export_chrome_trace("trace_task1.json")
-    #
-    # print(colored(f"Total generate time: {( end - start ):.4f} s", "blue"))
-    #
-    # generated = [output["text"] for output in outputs]
-    # # print(f"{generated[:10]}")
 
+    # baseline
+    base_prompt = f'Given the above film review, answer whether the film is suitable for kids. Respond ONLY with "yes" or "no", in all lower case.\n'
+    samples, tast_str_len = dataset.sample(base_prompt, num_input_lines)
+    sampling_params.task_str_len = tast_str_len
+
+    # The first task will generate kv cache index for texts
+    # with profile(
+    #     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    #     profile_memory=True,
+    #     with_stack=True,
+    # ) as prof:
+    start = time()
+    outputs = llm.generate(samples, sampling_params, use_index=False, use_tqdm=False)
+    end = time()
+    # prof.export_chrome_trace("trace_task1.json")
+
+    print(colored(f"Total generate time: {( end - start ):.4f} s", "blue"))
+
+    baseline_generated = [output["text"] for output in outputs]
+    # print(f"{baseline_generated[:10]}")
+
+    llm.scheduler.block_manager.reset()
     ###################################################################
-    print(colored("\nTask2: sentiment", "yellow"))
-    base_prompt = f'Given the above film review, answer whether the sentiment is "positive" or "negative". Respond ONLY with "positive" or "negative", in all lower case.\n'
+    # print(colored("\nTask2: sentiment", "yellow"))
+    base_prompt = f'Given the above film review, answer whether the film is suitable for kids. Respond ONLY with "yes" or "no", in all lower case.\n'
     samples, tast_str_len = dataset.sample(base_prompt, num_input_lines)
     sampling_params.task_str_len = tast_str_len
 
@@ -135,19 +137,24 @@ def main():
     print(colored(f"Total generate time: {( end - start ):.4f} s", "blue"))
     print(f"output: {len(outputs)}")
 
-    generated = [output["text"] for output in outputs]
-    print(f"{generated[:10]}")
+    optimized_generated = [output["text"] for output in outputs]
+    print(f"{optimized_generated[:10]}")
+
+    # Calculate Recall (Consistency)
+    matches = sum(1 for b, o in zip(baseline_generated, optimized_generated) if b == o)
+    recall = matches / len(baseline_generated)
+    print(f"Recall (Index vs No-Index): {recall:.4f}")
 
     data = pd.read_csv("./data/imdb.csv").head(len(outputs))
-    correct_predictions = (data["sentiment"] == generated).sum()
+    correct_predictions = (data["sentiment"] == optimized_generated).sum()
     accuracy = correct_predictions / len(outputs)
     print(f"Task 2 Accuracy:{accuracy}\n")
 
-    # print(data[data["suitable"] != generated]["review"])
+    # print(data[data["suitable"] != optimized_generated]["review"])
     # TODO: restrict output token ids
     print("--- Checking for Incorrect and Invalid Results ---")
     mismatched_count = 0
-    for i, (gen_text, true_label) in enumerate(zip(generated, data["sentiment"])):
+    for i, (gen_text, true_label) in enumerate(zip(optimized_generated, data["sentiment"])):
         if gen_text.lower() not in ["positive", "negative"]:
             print(
                 f"Index {i}: Invalid output. Generated: '{gen_text}', Expected: '{true_label}'"

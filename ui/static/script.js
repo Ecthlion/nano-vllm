@@ -185,7 +185,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         progressContainer.style.display = 'block';
         progressBar.style.width = '0%';
-        document.getElementById('results-card').style.display = 'none';
+        // document.getElementById('results-card').style.display = 'none';
 
         // Simulate progress
         let width = 0;
@@ -286,15 +286,83 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function displayAnalyseResults(data) {
         document.getElementById('results-card').style.display = 'block';
-        document.getElementById('results-info').style.display = 'none';
-        document.getElementById('results-table-container').style.display = 'none';
-        document.getElementById('pagination-controls').style.display = 'none';
-        document.getElementById('profile-chart').style.display = 'none';
+        // document.getElementById('results-info').style.display = 'none';
+        // document.getElementById('results-table-container').style.display = 'none';
+        // document.getElementById('pagination-controls').style.display = 'none';
+        // document.getElementById('profile-chart').style.display = 'none';
         
         const analyseChart = document.getElementById('analyse-chart');
         analyseChart.style.display = 'block';
+        const recallChart = document.getElementById('recall-chart');
+        recallChart.style.display = 'block';
         
         renderAnalyseChart(data.series);
+        if (data.recall) {
+            renderRecallChart(data.recall);
+        }
+    }
+
+    function renderRecallChart(recallData) {
+        const chartDom = document.getElementById('recall-chart');
+        let myChart = echarts.getInstanceByDom(chartDom);
+        if (myChart) {
+            myChart.dispose();
+        }
+        myChart = echarts.init(chartDom, null, {renderer: 'svg'});
+
+        const option = {
+            title: {
+                text: 'Recall vs Sparsity',
+                left: 'center'
+            },
+            tooltip: {
+                trigger: 'axis'
+            },
+            grid: {
+                left: '3%',
+                right: '4%',
+                bottom: '3%',
+                containLabel: true
+            },
+            xAxis: {
+                type: 'category',
+                name: 'Sparsity',
+                data: recallData.map(item => item.sparsity),
+                axisTick: {
+                    alignWithLabel: true
+                }
+            },
+            yAxis: {
+                type: 'value',
+                name: 'Recall',
+                min: 0,
+                max: 1
+            },
+            series: [
+                {
+                    name: 'Recall',
+                    type: 'line',
+                    data: recallData.map(item => item.recall),
+                    smooth: true,
+                    itemStyle: {
+                        color: '#ee6666'
+                    },
+                    label: {
+                        show: true,
+                        position: 'top',
+                        formatter: function(params) {
+                            return params.value.toFixed(2);
+                        }
+                    }
+                }
+            ]
+        };
+
+        myChart.setOption(option);
+        
+        window.addEventListener('resize', function() {
+            myChart.resize();
+        });
     }
 
     function renderAnalyseChart(seriesData) {

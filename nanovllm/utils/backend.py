@@ -63,6 +63,7 @@ class BackendAPI:
         #     self.text_field = field
         #     self.current_sparsity = sparsity
         #     self.index_limit = limit
+        #     self.llm.scheduler.block_manager.reset()
         #     return {
         #         "field": field,
         #         "rows_indexed": len(self.data) if limit is None else limit,  # type: ignore
@@ -109,6 +110,7 @@ class BackendAPI:
             "sparsity": sparsity,
             "index_size_bytes": index_size,
         }
+        self.llm.scheduler.block_manager.reset()
         return meta
 
     def _estimate_index_size(self) -> int:
@@ -120,20 +122,29 @@ class BackendAPI:
         return total
 
     def _parse_query(self, query: str):
-        filter_part, llm_part = query.split(" and LLM(", 1)
+        """
+        Parse queries of the form:
+          - "<pandas_filter> and LLM('<prompt>') == '<target>'"
+          - "LLM('<prompt>') == '<target>'"  (no pandas filter)
 
-        # Use rfind to locate the closing parenthesis and operator,
-        # allowing quotes inside the prompt string.
-        split_marker = ") == "
-        split_idx = llm_part.rfind(split_marker)
+        Returns: (df_filter, base_prompt, target_val)
+        If no pandas filter is provided, `df_filter` will be the literal string "True"
+        which is safe to pass to `pandas.DataFrame.query`.
+        """
+        # Use a regex to robustly extract the prompt and the target. DOTALL
+        # allows the prompt to contain newlines.
+        m = re.search(r"LLM\((?P<prompt>.*?)\)\s*==\s*(?P<target>.+)$", query, flags=re.DOTALL)
+        if not m:
+            raise ValueError("Invalid query format")
 
-        if split_idx == -1:
-            raise ValueError("Invalid format")
+        prompt_part = m.group("prompt").strip()
+        target_part = m.group("target").strip()
 
-        prompt_part = llm_part[:split_idx].strip()
-        target_part = llm_part[split_idx + len(split_marker) :].strip()
+        # The filter is whatever precedes the matched LLM(...) segment.
+        filter_part = query[: m.start()].strip()
+        df_filter = filter_part if filter_part else "True"
 
-        # Remove outer quotes from prompt
+        # Remove outer quotes from prompt if present
         if (
             len(prompt_part) >= 2
             and prompt_part[0] in ("'", '"')
@@ -143,10 +154,11 @@ class BackendAPI:
         else:
             base_prompt = prompt_part.strip("'\"")
 
-        # Unescape newlines
+        # Unescape newlines in the prompt
         base_prompt = base_prompt.replace("\\n", "\n")
+
+        # Clean target value
         target_val = target_part.strip().strip("'\"")
-        df_filter = filter_part.strip()
 
         return df_filter, base_prompt, target_val
 
@@ -156,6 +168,7 @@ class BackendAPI:
     def query(
         self, query: str, use_index: bool, limit: int | None = 1000
     ) -> dict[str, Any]:
+        self.llm.scheduler.block_manager.reset()
         self._ensure_data_loaded()
         df = self.data.copy()  # type: ignore[assignment]
         if limit is not None:
@@ -175,7 +188,8 @@ class BackendAPI:
 
         # 1. Apply pandas filter
         try:
-            df = df.query(df_filter)
+            if df_filter != "True":
+                df = df.query(df_filter)
         except Exception as e:
             return {"results": [], "metadata": {}, "error": f"Pandas query error: {e}"}
 
@@ -286,6 +300,7 @@ class BackendAPI:
         }
 
     def analyse(self, query: str, limit: int | None = 1000) -> dict[str, Any]:
+        self.llm.scheduler.block_manager.reset()
         self._ensure_data_loaded()
         df = self.data.copy()  # type: ignore[assignment]
         if limit is not None:
@@ -294,6 +309,7 @@ class BackendAPI:
         # Parse query (same as query method)
         try:
             df_filter, base_prompt, target_val = self._parse_query(query)
+            print(df_filter, base_prompt, target_val)
         except ValueError:
             return {
                 "error": "Invalid query format. Expected: filter and LLM('prompt') == 'target'",
@@ -302,7 +318,8 @@ class BackendAPI:
         # Apply pandas filter
         start = time.time()
         try:
-            df = df.query(df_filter)
+            if df_filter != "True":
+                df = df.query(df_filter)
         except Exception as e:
             return {"error": f"Pandas query error: {e}"}
 
@@ -328,12 +345,14 @@ class BackendAPI:
         sp.task_str_len = len(base_prompt)
 
         results = []
+        sorted_ids = sorted([p[0] for p in tuple_prompts])
+        baseline_indices = set()
 
         # Run 1: No Index
         print("=========No Index==========")
         set_all_seeds(42)
         start_time = time.perf_counter()
-        self.llm.generate(
+        outputs_no_index = self.llm.generate(
             tuple_prompts,
             sp,
             use_index=False,
@@ -344,7 +363,13 @@ class BackendAPI:
         )
         time_no_index = time.perf_counter() - start_time
         results.append({"name": "No Index", "value": time_no_index})
+        self.llm.scheduler.block_manager.reset()
         print(f"========={time_no_index:.2f}s==========")
+
+        for idx, out in zip(sorted_ids, outputs_no_index):
+            if out.get("text", "").strip() == target_val:
+                baseline_indices.add(idx)
+
 
         # Run 2: Pruned Index (Async/Optimize=True)
         print("=========Pruned Index==========")
@@ -361,6 +386,7 @@ class BackendAPI:
         )
         time_pruned = time.perf_counter() - start_time
         results.append({"name": "Pruned Index", "value": time_pruned})
+        self.llm.scheduler.block_manager.reset()
         print(f"========={time_pruned:.2f}s==========")
 
         # Run 3: Full Index (Sync/Optimize=False)
@@ -381,9 +407,42 @@ class BackendAPI:
         )
         time_full = time.perf_counter() - start_time
         results.append({"name": "Full Index", "value": time_full})
+        self.llm.scheduler.block_manager.reset()
         print(f"========={time_full:.2f}s==========")
 
-        return {"series": results}
+        # Recall Analysis
+        print("=========Recall Analysis==========")
+        recall_series = []
+        for s in [0.5, 0.6, 0.7, 0.8, 0.9]:
+            set_all_seeds(42)
+            self.build_index(
+                s, self.text_field, limit, False  # type: ignore
+            )
+            outputs_s = self.llm.generate(
+                tuple_prompts,
+                sp,
+                use_index=True,
+                use_tqdm=False,
+                pruning=False,
+                sparsity=s,
+                optimize=True,
+            )
+            
+            current_indices = set()
+            for idx, out in zip(sorted_ids, outputs_s):
+                if out.get("text", "").strip() == target_val:
+                    current_indices.add(idx)
+            
+            if len(baseline_indices) > 0:
+                recall = len(baseline_indices.intersection(current_indices)) / len(baseline_indices)
+            else:
+                recall = 1.0
+            
+            recall_series.append({"sparsity": s, "recall": recall})
+            self.llm.scheduler.block_manager.reset()
+            print(f"Sparsity {s}: Recall {recall:.2f}")
+
+        return {"series": results, "recall": recall_series}
 
     # ------------------------------------------------------------------
     # Helpers
