@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     statusP.textContent = `File uploaded successfully: ${file.name}`;
                     statusP.style.color = 'green';
                     uploadedFilepath = filepath;
-                    document.getElementById('index-card').style.display = 'block';
+                    document.getElementById('index-section').style.display = 'block';
                 }
             }, 20); // Fast interval
         }
@@ -104,7 +104,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         statusP.textContent = `File uploaded successfully: ${file.name}`;
                         statusP.style.color = 'green';
                         uploadedFilepath = data.filepath;
-                        document.getElementById('index-card').style.display = 'block';
+                        document.getElementById('index-section').style.display = 'block';
                     }
                 } else {
                     statusP.textContent = `Error: ${xhr.statusText}`;
@@ -262,7 +262,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Step 4: Display Results ---
     let currentResults = [];
     let currentPage = 1;
-    const rowsPerPage = 10;
+    const rowsPerPage = 3;
 
     function displayResults(data) {
         document.getElementById('results-card').style.display = 'block';

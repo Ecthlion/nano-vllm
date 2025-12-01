@@ -17,7 +17,7 @@ class BackendAPI:
         print("init backend")
         path = os.path.expanduser("/data/zwt/model/models/Qwen/Qwen3-8B/")
         self.llm = LLM(path, enforce_eager=False, tensor_parallel_size=1)
-        self.base_sampling = SamplingParams(temperature=1, max_tokens=1)
+        self.base_sampling = SamplingParams(temperature=0, max_tokens=1)
         self.data: pd.DataFrame | None = None
         self.data_path: str | None = None
         self.text_field: str | None = None
@@ -346,7 +346,6 @@ class BackendAPI:
 
         results = []
         sorted_ids = sorted([p[0] for p in tuple_prompts])
-        baseline_indices = set()
 
         # Run 1: No Index
         print("=========No Index==========")
@@ -366,54 +365,58 @@ class BackendAPI:
         self.llm.scheduler.block_manager.reset()
         print(f"========={time_no_index:.2f}s==========")
 
+        baseline_indices = set()
         for idx, out in zip(sorted_ids, outputs_no_index):
             if out.get("text", "").strip() == target_val:
                 baseline_indices.add(idx)
+        optimized_generated = [output["text"] for output in outputs_no_index]
+        print(f"{optimized_generated[:10]}")
 
 
-        # Run 2: Pruned Index (Async/Optimize=True)
-        print("=========Pruned Index==========")
-        set_all_seeds(42)
-        start_time = time.perf_counter()
-        self.llm.generate(
-            tuple_prompts,
-            sp,
-            use_index=True,
-            use_tqdm=False,
-            pruning=True,
-            sparsity=self.current_sparsity or 0.9,
-            optimize=True,
-        )
-        time_pruned = time.perf_counter() - start_time
-        results.append({"name": "Pruned Index", "value": time_pruned})
-        self.llm.scheduler.block_manager.reset()
-        print(f"========={time_pruned:.2f}s==========")
-
-        # Run 3: Full Index (Sync/Optimize=False)
-        print("=========Full Index==========")
-        self.build_index(
-            self.current_sparsity, self.text_field, limit, True  # type: ignore
-        )
-        set_all_seeds(42)
-        start_time = time.perf_counter()
-        self.llm.generate(
-            tuple_prompts,
-            sp,
-            use_index=True,
-            use_tqdm=False,
-            pruning=False,
-            sparsity=self.current_sparsity or 0.9,
-            optimize=False,
-        )
-        time_full = time.perf_counter() - start_time
-        results.append({"name": "Full Index", "value": time_full})
-        self.llm.scheduler.block_manager.reset()
-        print(f"========={time_full:.2f}s==========")
+        # # Run 2: Pruned Index (Async/Optimize=True)
+        # print("=========Pruned Index==========")
+        # set_all_seeds(42)
+        # start_time = time.perf_counter()
+        # self.llm.generate(
+        #     tuple_prompts,
+        #     sp,
+        #     use_index=True,
+        #     use_tqdm=False,
+        #     pruning=True,
+        #     sparsity=self.current_sparsity or 0.9,
+        #     optimize=True,
+        # )
+        # time_pruned = time.perf_counter() - start_time
+        # results.append({"name": "Pruned Index", "value": time_pruned})
+        # self.llm.scheduler.block_manager.reset()
+        # print(f"========={time_pruned:.2f}s==========")
+        #
+        # # Run 3: Full Index (Sync/Optimize=False)
+        # print("=========Full Index==========")
+        # self.build_index(
+        #     self.current_sparsity, self.text_field, limit, True  # type: ignore
+        # )
+        # set_all_seeds(42)
+        # start_time = time.perf_counter()
+        # self.llm.generate(
+        #     tuple_prompts,
+        #     sp,
+        #     use_index=True,
+        #     use_tqdm=False,
+        #     pruning=False,
+        #     sparsity=self.current_sparsity or 0.9,
+        #     optimize=False,
+        # )
+        # time_full = time.perf_counter() - start_time
+        # results.append({"name": "Full Index", "value": time_full})
+        # self.llm.scheduler.block_manager.reset()
+        # print(f"========={time_full:.2f}s==========")
 
         # Recall Analysis
         print("=========Recall Analysis==========")
         recall_series = []
-        for s in [0.5, 0.6, 0.7, 0.8, 0.9]:
+
+        for s in [0.1, 0.5, 0.6, 0.7, 0.8, 0.9]:
             set_all_seeds(42)
             self.build_index(
                 s, self.text_field, limit, False  # type: ignore
@@ -437,10 +440,13 @@ class BackendAPI:
                 recall = len(baseline_indices.intersection(current_indices)) / len(baseline_indices)
             else:
                 recall = 1.0
+            print(len(baseline_indices.intersection(current_indices)), len(baseline_indices))
             
             recall_series.append({"sparsity": s, "recall": recall})
             self.llm.scheduler.block_manager.reset()
             print(f"Sparsity {s}: Recall {recall:.2f}")
+            optimized_generated = [output["text"] for output in outputs_s]
+            print(f"{optimized_generated[:10]}")
 
         return {"series": results, "recall": recall_series}
 

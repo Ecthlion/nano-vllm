@@ -9,4 +9,5 @@ class SamplingParams:
     task_str_len: int = 0
 
     def __post_init__(self):
-        assert self.temperature > 1e-10, "greedy sampling is not permitted"
+        # assert self.temperature > 1e-10, "greedy sampling is not permitted"
+        pass

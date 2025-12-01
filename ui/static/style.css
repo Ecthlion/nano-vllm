@@ -5,10 +5,9 @@ body {
     color: #333;
     line-height: 1.4;
     margin: 0;
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
     font-size: 14px;
 }
 
@@ -46,16 +45,13 @@ body {
     gap: 15px;
     padding: 15px;
     flex: 1;
-    min-height: 0; /* Important for nested flex scrolling */
 }
 
 .sidebar {
-    flex: 0 0 300px;
+    flex: 0 0 500px;
     display: flex;
     flex-direction: column;
     gap: 15px;
-    overflow-y: auto;
-    padding-right: 5px; /* Space for scrollbar */
 }
 
 .content-area {
@@ -64,8 +60,6 @@ body {
     display: flex;
     flex-direction: column;
     gap: 15px;
-    overflow-y: auto;
-    padding-right: 5px;
 }
 
 /* Step Cards */
@@ -107,7 +101,7 @@ textarea {
     padding: 8px;
     border: 1px solid #cbd5e0;
     border-radius: 4px;
-    font-size: 0.95em;
+    font-size: 1.2em;
     box-sizing: border-box;
     font-family: inherit;
 }
