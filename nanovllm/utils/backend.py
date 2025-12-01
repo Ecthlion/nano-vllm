@@ -52,6 +52,7 @@ class BackendAPI:
         field: str | None = None,
         limit: int | None = 1000,
         no_pruning=False,
+        virtual_intent: str = "The key entities and summary of above text are:\n"
     ) -> dict[str, Any]:
         self._ensure_data_loaded()
         field = field or self.text_field
@@ -81,7 +82,7 @@ class BackendAPI:
         for idx, row in subset.iterrows():
             text_id = idx
             text = str(row[field])
-            prompt = f"{text}\n "
+            prompt = f"{text} "
             samples.append((text_id, prompt))  # type: ignore
 
         sp = SamplingParams(
@@ -222,7 +223,7 @@ class BackendAPI:
             context_value = (
                 str(row_dict.get(self.text_field, "")) if self.text_field else ""
             )
-            full_prompt = f"{context_value}\n{base_prompt}"
+            full_prompt = f"{context_value} {base_prompt}"
 
             tuple_prompts.append((int(idx), full_prompt))  # type: ignore
             order.append(idx)
@@ -231,7 +232,7 @@ class BackendAPI:
             temperature=self.base_sampling.temperature,
             max_tokens=self.base_sampling.max_tokens,
         )
-        sp.task_str_len = len(base_prompt)
+        sp.task_str_len = len(base_prompt) + 1
 
         outputs = self.llm.generate(
             tuple_prompts,
@@ -342,7 +343,7 @@ class BackendAPI:
             temperature=self.base_sampling.temperature,
             max_tokens=self.base_sampling.max_tokens,
         )
-        sp.task_str_len = len(base_prompt)
+        sp.task_str_len = len(base_prompt) + 1
 
         results = []
         sorted_ids = sorted([p[0] for p in tuple_prompts])
@@ -365,62 +366,60 @@ class BackendAPI:
         self.llm.scheduler.block_manager.reset()
         print(f"========={time_no_index:.2f}s==========")
 
-        baseline_indices = set()
-        for idx, out in zip(sorted_ids, outputs_no_index):
-            if out.get("text", "").strip() == target_val:
-                baseline_indices.add(idx)
-        optimized_generated = [output["text"] for output in outputs_no_index]
-        print(f"{optimized_generated[:10]}")
+        baseline = [output["text"] for output in outputs_no_index]
+        print(f"{baseline[:10]}")
 
-        # Run 2: Pruned Index (Async/Optimize=True)
-        print("=========Pruned Index==========")
-        set_all_seeds(42)
-        start_time = time.perf_counter()
-        self.llm.generate(
-            tuple_prompts,
-            sp,
-            use_index=True,
-            use_tqdm=False,
-            pruning=True,
-            sparsity=self.current_sparsity or 0.9,
-            optimize=True,
-        )
-        time_pruned = time.perf_counter() - start_time
-        self.llm.scheduler.block_manager.reset()
-        print(f"========={time_pruned:.2f}s==========")
-
-        # Run 3: Full Index (Sync/Optimize=False)
-        print("=========Full Index==========")
-        self.build_index(
-            self.current_sparsity, self.text_field, limit, True  # type: ignore
-        )
-        set_all_seeds(42)
-        start_time = time.perf_counter()
-        self.llm.generate(
-            tuple_prompts,
-            sp,
-            use_index=True,
-            use_tqdm=False,
-            pruning=False,
-            sparsity=self.current_sparsity or 0.9,
-            optimize=False,
-        )
-        time_full = time.perf_counter() - start_time
-        results.append({"name": "Full Index", "value": time_full})
-        self.llm.scheduler.block_manager.reset()
-        print(f"========={time_full:.2f}s==========")
-
-        results.append({"name": "Pruned Index", "value": time_pruned})
+        # # Run 2: Pruned Index (Async/Optimize=True)
+        # print("=========Pruned Index==========")
+        # set_all_seeds(42)
+        # start_time = time.perf_counter()
+        # self.llm.generate(
+        #     tuple_prompts,
+        #     sp,
+        #     use_index=True,
+        #     use_tqdm=False,
+        #     pruning=True,
+        #     sparsity=self.current_sparsity or 0.9,
+        #     optimize=True,
+        # )
+        # time_pruned = time.perf_counter() - start_time
+        # self.llm.scheduler.block_manager.reset()
+        # print(f"========={time_pruned:.2f}s==========")
+        #
+        # # Run 3: Full Index (Sync/Optimize=False)
+        # print("=========Full Index==========")
+        # self.build_index(
+        #     self.current_sparsity, self.text_field, limit, True  # type: ignore
+        # )
+        # set_all_seeds(42)
+        # start_time = time.perf_counter()
+        # self.llm.generate(
+        #     tuple_prompts,
+        #     sp,
+        #     use_index=True,
+        #     use_tqdm=False,
+        #     pruning=False,
+        #     sparsity=self.current_sparsity or 0.9,
+        #     optimize=False,
+        # )
+        # time_full = time.perf_counter() - start_time
+        # results.append({"name": "Full Index", "value": time_full})
+        # self.llm.scheduler.block_manager.reset()
+        # print(f"========={time_full:.2f}s==========")
+        #
+        # results.append({"name": "Pruned Index", "value": time_pruned})
 
         # Recall Analysis
         print("=========Recall Analysis==========")
         recall_series = []
 
-        for s in [0.6, 0.7, 0.8, 0.9, 0.99]:
+        # for s in [0.6, 0.7, 0.8, 0.9, 0.99]:
+        for s in [0.5, 0.7, 0.9]:
             set_all_seeds(42)
             self.build_index(
                 s, self.text_field, limit, False  # type: ignore
             )
+            set_all_seeds(42)
             outputs_s = self.llm.generate(
                 tuple_prompts,
                 sp,
@@ -431,22 +430,33 @@ class BackendAPI:
                 optimize=True,
             )
             
-            current_indices = set()
-            for idx, out in zip(sorted_ids, outputs_s):
-                if out.get("text", "").strip() == target_val:
-                    current_indices.add(idx)
+            current = [output["text"] for output in outputs_s]
+            print(f"{current[:10]}")
             
-            if len(baseline_indices) > 0:
-                recall = len(baseline_indices.intersection(current_indices)) / len(baseline_indices)
-            else:
-                recall = 1.0
-            print(len(baseline_indices.intersection(current_indices)), len(baseline_indices))
+            total = 0
+            same = 0
+
+            base_yes = 0
+            cur_yes = 0
+            for base, cur in zip(baseline, current):
+                if base in ["yes", "no"]:
+                    total += 1
+
+                    if base == "yes":
+                        base_yes += 1
+                        if cur == base:
+                            cur_yes += 1
+
+                    if cur == base:
+                        same += 1
+
+            accuracy = same / total
+            recall = cur_yes / base_yes
+            print(same, total)
             
-            recall_series.append({"sparsity": s, "recall": recall})
+            recall_series.append({"sparsity": s, "recall": accuracy})
             self.llm.scheduler.block_manager.reset()
-            print(f"Sparsity {s}: Recall {recall:.2f}")
-            optimized_generated = [output["text"] for output in outputs_s]
-            print(f"{optimized_generated[:10]}")
+            print(f"Sparsity {s}, Accuracy {accuracy:.2f}, Recall {recall:.2f}")
 
         return {"series": results, "recall": recall_series}
 

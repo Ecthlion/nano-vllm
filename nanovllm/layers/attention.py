@@ -89,7 +89,56 @@ class Attention(nn.Module):
                 q_last = q_gqa.index_select(0, last_q_idx)  # [B, num_kv_heads, head_dim]
                 q_last_per_token = q_last.index_select(0, seq_ids)  # [N, num_kv_heads, head_dim]
                 # sim per head, then mean over kv heads -> [N]
-                scores = (k * q_last_per_token).sum(dim=-1).mean(dim=-1)
+                base_scores = (k * q_last_per_token).sum(dim=-1).mean(dim=-1)
+
+                # Local-structure score: cosine distance between each key and the
+                # average key vector within a symmetric window (excluding itself).
+                # window_size = max(int(getattr(context, "pruning_window", 32)), 0)
+                # cos_scores = torch.zeros_like(base_scores)
+                # if window_size == 0:
+                #     cos_scores = base_scores
+                # else:
+                #     eps = 1e-6
+                #     for i in range(B):
+                #         s = int(cuk[i].item()); e = int(cuk[i+1].item())
+                #         seq_len = e - s
+                #         if seq_len <= 1:
+                #             cos_scores[s:e] = base_scores[s:e]
+                #             continue
+                #         seq_k = k[s:e]  # [L, num_kv_heads, head_dim]
+                #         seq_k_flat = seq_k.view(seq_len, -1)
+                #         prefix = torch.cat(
+                #             [seq_k_flat.new_zeros(1, seq_k_flat.size(1)), torch.cumsum(seq_k_flat, dim=0)],
+                #             dim=0,
+                #         )
+                #         positions = torch.arange(seq_len, device=seq_k.device)
+                #         left = torch.clamp(positions - window_size, min=0)
+                #         right = torch.clamp(positions + window_size + 1, max=seq_len)
+                #         window_sums = prefix[right] - prefix[left]
+                #         window_sums = window_sums - seq_k_flat
+                #         counts = right - left - 1
+                #         valid_mask = counts > 0
+                #         counts_safe = torch.where(valid_mask, counts, torch.ones_like(counts))
+                #         counts_safe = counts_safe.to(seq_k.dtype).unsqueeze(-1)
+                #         mean_flat = window_sums / counts_safe
+                #         mean_flat[~valid_mask] = 0
+                #         seq_mean = mean_flat.view_as(seq_k)
+                #
+                #         dot = (seq_k * seq_mean).sum(dim=-1)
+                #         k_norm = seq_k.norm(dim=-1)
+                #         mean_norm = seq_mean.norm(dim=-1)
+                #         denom = torch.clamp(k_norm * mean_norm, min=eps)
+                #         cos_sim = torch.where(
+                #             (valid_mask.unsqueeze(-1)) & (mean_norm > 0),
+                #             dot / denom,
+                #             torch.ones_like(dot),
+                #         )
+                #         cos_dist = 1 - cos_sim
+                #         seq_score = cos_dist.mean(dim=-1)
+                #         seq_score = torch.where(valid_mask, seq_score, base_scores[s:e])
+                #         cos_scores[s:e] = seq_score
+
+                scores = base_scores
 
                 alpha = context.sparsity
                 pruned_locals: list[torch.Tensor] = []

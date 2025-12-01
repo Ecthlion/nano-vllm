@@ -44,6 +44,8 @@ class KVCacheIndex:
         return_timing: bool = False,
     ):
         _, num_layers, _, block_size, num_kv_heads, head_dim = self.gpu_kv_cache.shape
+        total_token = 0.0
+        total_prune = 0.0
         with torch.cuda.stream(stream):
             start_event = (
                 torch.cuda.Event(enable_timing=True) if return_timing else None
@@ -123,6 +125,11 @@ class KVCacheIndex:
                     "pruning_len": len(pruned),
                     "text_tokens_pruned": text_tokens_pruned,
                 }
+                total_token += len(seq.token_ids) - 1
+                total_prune += len(pruned)
+
+        # if total_token != 0:
+        #     print(f"[real sparsity]: {(total_prune / total_token):.2f}")
         # No global synchronize here; let transfers overlap with subsequent work
         if self.dirty:
             event = torch.cuda.Event(blocking=False, enable_timing=return_timing)
