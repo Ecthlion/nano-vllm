@@ -262,7 +262,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Step 4: Display Results ---
     let currentResults = [];
     let currentPage = 1;
-    const rowsPerPage = 3;
+    const rowsPerPage = 2;
 
     function displayResults(data) {
         document.getElementById('results-card').style.display = 'block';
@@ -322,7 +322,7 @@ document.addEventListener('DOMContentLoaded', function() {
             grid: {
                 left: '3%',
                 right: '4%',
-                bottom: 60,
+                bottom: 30,
                 containLabel: true
             },
             xAxis: {
@@ -332,9 +332,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 nameGap: 30,
                 nameTextStyle: { fontSize: "0.97em" },
                 data: recallData.map(item => item.sparsity),
-                axisTick: {
-                    alignWithLabel: true
-                },
+                // axisTick: {
+                //     alignWithLabel: true
+                // },
                 axisLabel: { fontSize: "0.95em" }
             },
             yAxis: {
@@ -560,7 +560,7 @@ document.addEventListener('DOMContentLoaded', function() {
             title: {
                 text: 'Execution Profile',
                 left: 'center',
-                textStyle: { fontSize: 18 }
+                textStyle: { fontSize: "1em" }
             },
             dataZoom: [
                 {
@@ -583,7 +583,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 min: 0,
                 scale: true,
                 axisLabel: {
-                    fontSize: 14,
+                    fontSize: "0.95em",
                     formatter: function (val) {
                         return val + ' ms';
                     }
@@ -592,7 +592,7 @@ document.addEventListener('DOMContentLoaded', function() {
             yAxis: {
                 data: categories,
                 inverse: true,
-                axisLabel: { fontSize: 14 }
+                axisLabel: { fontSize: "0.97em" }
             },
             series: [
                 {

@@ -372,8 +372,24 @@ class BackendAPI:
         optimized_generated = [output["text"] for output in outputs_no_index]
         print(f"{optimized_generated[:10]}")
 
+        # Run 2: Pruned Index (Async/Optimize=True)
+        print("=========Pruned Index==========")
+        set_all_seeds(42)
+        start_time = time.perf_counter()
+        self.llm.generate(
+            tuple_prompts,
+            sp,
+            use_index=True,
+            use_tqdm=False,
+            pruning=True,
+            sparsity=self.current_sparsity or 0.9,
+            optimize=True,
+        )
+        time_pruned = time.perf_counter() - start_time
+        self.llm.scheduler.block_manager.reset()
+        print(f"========={time_pruned:.2f}s==========")
 
-        # Run 2: Full Index (Sync/Optimize=False)
+        # Run 3: Full Index (Sync/Optimize=False)
         print("=========Full Index==========")
         self.build_index(
             self.current_sparsity, self.text_field, limit, True  # type: ignore
@@ -394,32 +410,13 @@ class BackendAPI:
         self.llm.scheduler.block_manager.reset()
         print(f"========={time_full:.2f}s==========")
 
-        # Run 3: Pruned Index (Async/Optimize=True)
-        print("=========Pruned Index==========")
-        set_all_seeds(42)
-        start_time = time.perf_counter()
-        self.llm.generate(
-            tuple_prompts,
-            sp,
-            use_index=True,
-            use_tqdm=False,
-            pruning=True,
-            sparsity=self.current_sparsity or 0.9,
-            optimize=True,
-        )
-        time_pruned = time.perf_counter() - start_time
         results.append({"name": "Pruned Index", "value": time_pruned})
-        self.llm.scheduler.block_manager.reset()
-        print(f"========={time_pruned:.2f}s==========")
-        results.append({"name": "Full Index", "value": time_full})
-        self.llm.scheduler.block_manager.reset()
-        print(f"========={time_full:.2f}s==========")
 
         # Recall Analysis
         print("=========Recall Analysis==========")
         recall_series = []
 
-        for s in [0.1, 0.5, 0.6, 0.7, 0.8, 0.9]:
+        for s in [0.6, 0.7, 0.8, 0.9, 0.99]:
             set_all_seeds(42)
             self.build_index(
                 s, self.text_field, limit, False  # type: ignore
