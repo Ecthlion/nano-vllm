@@ -64,10 +64,9 @@ class Attention(nn.Module):
         if k_cache.numel() and v_cache.numel():
             store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)
         if context.is_prefill:
-            # Discover pruning indices on the first layer only, and only when enabled.
+            # Discover pruning indices for each layer when pruning is enabled.
             if (
-                self.layer_id == 35
-                and context.pruning_enabled
+                context.pruning_enabled
                 and context.block_tables is None
                 and context.cu_seqlens_q is not None
                 and context.cu_seqlens_k is not None
@@ -150,7 +149,7 @@ class Attention(nn.Module):
                     if seqlen_i <= 1:
                         pruned_locals.append(torch.empty(0, dtype=torch.int64, device=k.device))
                         continue
-                    seq_scores = scores[s:e]
+                    seq_scores = scores[s + 1:e - 1]  # remove anchor token
                     k_prune = max(int(alpha * seqlen_i), 0)
                     k_prune = min(k_prune, seq_scores.numel())
                     if k_prune <= 0:
@@ -159,12 +158,18 @@ class Attention(nn.Module):
                     _, idx = torch.topk(seq_scores, k=k_prune, largest=False, sorted=False)
                     num_pruned += len(idx)
                     # store LOCAL indices within the sequence
+                    idx += 1
                     pruned_locals.append(idx)
 
-                print(f"[pruned] {num_pruned} tokens")
+                if self.layer_id == 35:
+                    print(f"[pruned][layer {self.layer_id}] {num_pruned} tokens")
 
                 # Stash into global context for later stages (KV cache store/persist)
-                context.pruned_local_indices = pruned_locals
+                if context.pruned_local_indices is None:
+                    context.pruned_local_indices = []
+                while len(context.pruned_local_indices) <= self.layer_id:
+                    context.pruned_local_indices.append([])
+                context.pruned_local_indices[self.layer_id] = pruned_locals
 
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache

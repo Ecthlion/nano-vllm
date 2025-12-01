@@ -82,7 +82,7 @@ class BackendAPI:
         for idx, row in subset.iterrows():
             text_id = idx
             text = str(row[field])
-            prompt = f"{text} "
+            prompt = f"{text}\n"
             samples.append((text_id, prompt))  # type: ignore
 
         sp = SamplingParams(
@@ -223,7 +223,7 @@ class BackendAPI:
             context_value = (
                 str(row_dict.get(self.text_field, "")) if self.text_field else ""
             )
-            full_prompt = f"{context_value} {base_prompt}"
+            full_prompt = f"{context_value}\n{base_prompt}"
 
             tuple_prompts.append((int(idx), full_prompt))  # type: ignore
             order.append(idx)
@@ -414,7 +414,7 @@ class BackendAPI:
         recall_series = []
 
         # for s in [0.6, 0.7, 0.8, 0.9, 0.99]:
-        for s in [0.5, 0.7, 0.9]:
+        for s in [0.05, 0.7, 0.9]:
             set_all_seeds(42)
             self.build_index(
                 s, self.text_field, limit, False  # type: ignore
@@ -452,7 +452,7 @@ class BackendAPI:
 
             accuracy = same / total
             recall = cur_yes / base_yes
-            print(same, total)
+            print(same, total, cur_yes, base_yes)
             
             recall_series.append({"sparsity": s, "recall": accuracy})
             self.llm.scheduler.block_manager.reset()

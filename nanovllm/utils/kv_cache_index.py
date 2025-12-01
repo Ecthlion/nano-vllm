@@ -23,8 +23,8 @@ class KVCacheIndex:
         self.indexed = False
         # text_id -> {
         #   "kv": Tensor[2, num_layers, seq_len_post_prune, num_kv_heads, head_dim],
-        #   "pruning_len": int,                       # number of pruned text tokens
-        #   "text_tokens_pruned": list[int] | None    # text tokens after pruning
+        #   "pruning_len": int,                       # number of pruned text tokens (layer 0 reference)
+        #   "text_tokens_pruned": list[int] | None    # text tokens after pruning (layer 0 reference)
         # }
         self.kv_cache_index: dict = {}
         if os.path.isfile(path):
@@ -56,11 +56,19 @@ class KVCacheIndex:
                 if seq.text_id is None or seq.text_id in self.kv_cache_index:
                     continue
 
-                # Determine pruned indices (local prompt positions relative to text_token_len)
-                pruned = sorted(seq.pruning_indices)
-                # Allocate CPU cache for UNPRUNED tokens only
-                pruned = [i for i in pruned if i < seq.text_token_len]
-                post_prune_len = seq.text_token_len - len(pruned)
+                # Determine per-layer pruned indices (local prompt positions)
+                base_pruned = seq.pruning_indices or []
+                layer_pruned: list[list[int]] = []
+                for layer_idx in range(num_layers):
+                    if layer_idx < len(base_pruned):
+                        layer_pruned.append(sorted(base_pruned[layer_idx]))
+                    else:
+                        layer_pruned.append([])
+
+                first_layer_pruned = [
+                    idx for idx in layer_pruned[0] if idx < seq.text_token_len
+                ]
+                post_prune_len = seq.text_token_len - len(first_layer_pruned)
                 cpu_kv_cache = torch.empty(
                     2,
                     num_layers,
@@ -88,30 +96,36 @@ class KVCacheIndex:
                     # Fallback guard: lengths must match; otherwise skip indexing
                     token_slots = token_slots[: seq.text_token_len]
 
-                # Filter out pruned positions to get kept slot ids
-                if pruned:
-                    kept_slots = [
-                        slot for i, slot in enumerate(token_slots) if i not in pruned
-                    ]
-                else:
-                    kept_slots = token_slots
+                assert post_prune_len > 0
 
-                keep_len = len(kept_slots)
-                # Compute pruned text token ids (final pruned state)
-                kept_local_indices = [
-                    i for i in range(seq.text_token_len) if i not in pruned
-                ]
-                text_tokens_pruned = [seq.token_ids[i] for i in kept_local_indices]
-
-                assert keep_len != 0
-
-                kept_slots_tensor = torch.tensor(
-                    kept_slots, dtype=torch.int64, device=self.gpu_kv_cache.device
-                )
-                # Vectorized gather per (kv, layer), then one D2H copy per pair
                 flat_blocks = self.gpu_kv_cache.shape[2] * block_size
-                for kv_idx in range(2):
-                    for layer_idx in range(num_layers):
+                device = self.gpu_kv_cache.device
+
+                for layer_idx in range(num_layers):
+                    pruned = [
+                        idx for idx in layer_pruned[layer_idx] if idx < seq.text_token_len
+                    ]
+                    if pruned:
+                        pruned_set = set(pruned)
+                        kept_slots = [
+                            slot
+                            for i, slot in enumerate(token_slots)
+                            if i not in pruned_set
+                        ]
+                    else:
+                        kept_slots = token_slots
+
+                    keep_len = len(kept_slots)
+                    if keep_len != post_prune_len:
+                        raise RuntimeError(
+                            "Pruned length mismatch across layers; ensure pruning_len is consistent."
+                        )
+
+                    kept_slots_tensor = torch.tensor(
+                        kept_slots, dtype=torch.int64, device=device
+                    )
+
+                    for kv_idx in range(2):
                         src_flat = self.gpu_kv_cache[kv_idx, layer_idx].reshape(
                             flat_blocks, num_kv_heads, head_dim
                         )
@@ -119,14 +133,21 @@ class KVCacheIndex:
                         dst = cpu_kv_cache[kv_idx, layer_idx, :keep_len]
                         dst.copy_(selected, non_blocking=True)
 
+                first_layer_pruned_set = set(first_layer_pruned)
+                kept_local_indices = [
+                    i for i in range(seq.text_token_len)
+                    if i not in first_layer_pruned_set
+                ]
+                text_tokens_pruned = [seq.token_ids[i] for i in kept_local_indices]
+
                 self.dirty = True
                 self.kv_cache_index[seq.text_id] = {
                     "kv": cpu_kv_cache,
-                    "pruning_len": len(pruned),
+                    "pruning_len": len(first_layer_pruned),
                     "text_tokens_pruned": text_tokens_pruned,
                 }
                 total_token += len(seq.token_ids) - 1
-                total_prune += len(pruned)
+                total_prune += len(first_layer_pruned)
 
         # if total_token != 0:
         #     print(f"[real sparsity]: {(total_prune / total_token):.2f}")

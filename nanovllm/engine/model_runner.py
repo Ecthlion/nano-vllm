@@ -315,9 +315,15 @@ class ModelRunner:
         # Capture pruning indices (if any) from context before resetting
         ctx = get_context()
         if is_prefill and ctx.pruning_enabled and ctx.pruned_local_indices is not None:
-            # Assign per-sequence pruning indices (local prompt positions)
-            for seq, local_idx in zip(seqs, ctx.pruned_local_indices):
-                seq.pruning_indices = local_idx.cpu().tolist()  # type: ignore[attr-defined]
+            # Assign per-sequence, per-layer pruning indices (local prompt positions)
+            for seq_idx, seq in enumerate(seqs):
+                per_layer: list[list[int]] = []
+                for layer_pruned in ctx.pruned_local_indices:
+                    if seq_idx < len(layer_pruned):
+                        per_layer.append(layer_pruned[seq_idx].cpu().tolist())
+                    else:
+                        per_layer.append([])
+                seq.pruning_indices = per_layer  # type: ignore[attr-defined]
         reset_context()
         return token_ids
 

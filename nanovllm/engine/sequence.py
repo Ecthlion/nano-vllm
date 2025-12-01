@@ -35,8 +35,8 @@ class Sequence:
         self.max_tokens = sampling_params.max_tokens
         self.ignore_eos = sampling_params.ignore_eos
         self.text_token_len = text_token_len
-        # Pruning related fields
-        self.pruning_indices = []  # local indices within prompt to prune (not applied yet)
+        # Pruning related fields: list of per-layer local index lists
+        self.pruning_indices: list[list[int]] = []
         self.pruning_len = pruning_len
 
     def __len__(self):
