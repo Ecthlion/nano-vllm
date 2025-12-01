@@ -22,67 +22,63 @@
                 
                 <!-- Upload Section -->
                 <div id="upload-section">
-                    <h3>Upload CSV</h3>
-                    <p>Select a CSV file to begin processing.</p>
+                    <!-- <p>Select a CSV file to begin processing.</p> -->
                     <form id="upload-form">
                         <input type="file" id="file-input" name="file" accept=".csv" required>
                         <button type="submit">Upload</button>
                     </form>
-                    <div class="progress-bar-container" id="upload-progress-container" style="display: none;">
+                    <!-- <div class="progress-bar-container" id="upload-progress-container" style="display: none;">
                         <div class="progress-bar" id="upload-progress"></div>
-                    </div>
+                    </div> -->
                     <p id="upload-status"></p>
                 </div>
 
                 <!-- Index Section -->
-                <div id="index-section" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
-                    <h3>Build Index</h3>
-                    <p>Select the desired sparsity and build the index.</p>
+                <div id="index-section" style="display: none; margin-top: 5px; padding-top: 5px; border-top: 1px solid #eee;">
+                    <!-- <p>Select the desired sparsity and build the index.</p> -->
                     <form id="index-form">
                         <label for="index-field">Index Field (Optional):</label>
-                        <div class="input-with-btn">
-                            <textarea id="index-field" name="field" rows="1" placeholder="e.g., text_column"></textarea>
-                            <button type="button" class="preset-btn" data-target="index-field" data-value="abstract">Preset</button>
-                        </div>
+                        <textarea id="index-field" name="field" rows="1" placeholder="e.g., text_column"></textarea>
 
                         <label for="sparsity-slider">Sparsity:</label>
                         <input type="range" id="sparsity-slider" name="sparsity" min="0" max="1" step="0.05" value="0.5">
                         <span id="sparsity-value">0.5</span>
                         <button type="submit">Build Index</button>
                     </form>
-                    <div class="progress-bar-container" id="index-progress-container" style="display: none;">
+                    <!-- <div class="progress-bar-container" id="index-progress-container" style="display: none;">
                         <div class="progress-bar" id="index-progress"></div>
-                    </div>
+                    </div> -->
                     <div id="index-info" style="display: none;">
-                        <p>Index Size: <span id="index-size"></span></p>
+                        <p style="color: green;">Index Size: <span id="index-size"></span></p>
                     </div>
                 </div>
             </div>
 
-            <!-- Step 3: Query -->
+            <!-- Step 2: Query -->
             <div class="step-card" id="query-card">
                 <h2>Step 2: Hybrid Query Execution.</h2>
                 <p>Enter a query using Pandas-like syntax to filter the data.</p>
                 <form id="query-form">
-                    <div class="input-with-btn">
-                        <textarea id="query-input" name="query" rows="3" placeholder="e.g., (sentiment == 'positive') & (audience == 'children')"></textarea>
-                        <button type="button" class="preset-btn" data-target="query-input" data-value="(sentiment == 'positive') & (audience == 'children')">Preset</button>
-                    </div>
-                    <div class="button-group">
-                        <button type="button" id="query-with-index">Run with Index</button>
-                        <button type="button" id="analyse-btn">Analyse</button>
-                    </div>
+                    <textarea id="query-input" name="query" rows="3" placeholder="e.g., (sentiment == 'positive') & (audience == 'children')"></textarea>
+                    <button type="button" id="query-with-index" style="width: 100%;">Run</button>
                 </form>
-                <div class="progress-bar-container" id="query-progress-container" style="display: none;">
+                <!-- <div class="progress-bar-container" id="query-progress-container" style="display: none;">
                     <div class="progress-bar" id="query-progress"></div>
-                </div>
+                </div> -->
+            </div>
+
+            <!-- Step 3: Analyse -->
+            <div class="step-card" id="analyse-card">
+                <h2>Step 3: Performance Analysis.</h2>
+                <p>Analyze the performance of the query execution.</p>
+                <button type="button" id="analyse-btn" style="width: 100%;">Analyse</button>
             </div>
         </aside>
 
         <main class="content-area">
-            <!-- Step 4: Results -->
+            <!-- Results -->
             <div class="step-card" id="results-card" style="display: none;">
-                <h2>Step 3: Performance Analysis.</h2>
+                <h2>Results & Visualization</h2>
                 <div id="results-info">
                     <p>Inference Time: <span id="inference-time"></span></p>
                     <p>Total Results: <span id="total-results"></span></p>
@@ -99,15 +95,15 @@
                     <button id="next-page">Next</button>
                 </div>
                 <h3>Analyse</h3>
-                <div class="chart-card" style="background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <div id="profile-chart" style="width: 100%; height: 350px;"></div>
+                <div class="chart-card" style="background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px;">
+                    <div id="profile-chart" style="width: 100%; height: 300px;"></div>
                 </div>
                 <div class="charts-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                     <div class="chart-card" style="background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                        <div id="analyse-chart" style="width: 100%; height: 350px; display: none;"></div>
+                        <div id="analyse-chart" style="width: 100%; height: 300px; display: none;"></div>
                     </div>
                     <div class="chart-card" style="background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                        <div id="recall-chart" style="width: 100%; height: 350px; display: none;"></div>
+                        <div id="recall-chart" style="width: 100%; height: 300px; display: none;"></div>
                     </div>
                 </div>
             </div>

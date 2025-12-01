@@ -31,8 +31,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const file = fileInput.files[0];
         if (!file) return;
 
-        const progressBar = document.getElementById('upload-progress');
-        const progressContainer = document.getElementById('upload-progress-container');
+        // const progressBar = document.getElementById('upload-progress');
+        // const progressContainer = document.getElementById('upload-progress-container');
         const statusP = document.getElementById('upload-status');
 
         // Check if file exists
@@ -58,30 +58,30 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         function simulateUpload(filepath) {
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
+            // progressContainer.style.display = 'block';
+            // progressBar.style.width = '0%';
             statusP.textContent = 'Uploading...';
 
-            let width = 0;
-            const interval = setInterval(() => {
-                width += 5; // Fast simulation
-                progressBar.style.width = width + '%';
-                if (width >= 100) {
-                    clearInterval(interval);
+            // let width = 0;
+            // const interval = setInterval(() => {
+            //     width += 5; // Fast simulation
+            //     progressBar.style.width = width + '%';
+            //     if (width >= 100) {
+            //         clearInterval(interval);
                     statusP.textContent = `File uploaded successfully: ${file.name}`;
                     statusP.style.color = 'green';
                     uploadedFilepath = filepath;
                     document.getElementById('index-section').style.display = 'block';
-                }
-            }, 20); // Fast interval
+            //     }
+            // }, 20); // Fast interval
         }
 
         function performUpload(file) {
             const formData = new FormData();
             formData.append('file', file);
 
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
+            // progressContainer.style.display = 'block';
+            // progressBar.style.width = '0%';
             statusP.textContent = 'Uploading...';
 
             const xhr = new XMLHttpRequest();
@@ -89,14 +89,14 @@ document.addEventListener('DOMContentLoaded', function() {
             xhr.upload.addEventListener('progress', function(e) {
                 if (e.lengthComputable) {
                     const percentComplete = (e.loaded / e.total) * 100;
-                    progressBar.style.width = percentComplete + '%';
+                    // progressBar.style.width = percentComplete + '%';
                 }
             });
 
             xhr.onload = function() {
                 if (xhr.status === 200) {
                     const data = JSON.parse(xhr.responseText);
-                    progressBar.style.width = '100%';
+                    // progressBar.style.width = '100%';
                     if (data.error) {
                         statusP.textContent = `Error: ${data.error}`;
                         statusP.style.color = 'red';
@@ -128,23 +128,23 @@ document.addEventListener('DOMContentLoaded', function() {
         const sparsity = sparsitySlider.value;
         const field = document.getElementById('index-field').value;
 
-        const progressBar = document.getElementById('index-progress');
-        const progressContainer = document.getElementById('index-progress-container');
+        // const progressBar = document.getElementById('index-progress');
+        // const progressContainer = document.getElementById('index-progress-container');
         const indexInfo = document.getElementById('index-info');
 
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '0%';
+        // progressContainer.style.display = 'block';
+        // progressBar.style.width = '0%';
         indexInfo.style.display = 'none';
 
         // Simulate index building progress
-        let width = 0;
-        const interval = setInterval(() => {
-            width += 5;
-            progressBar.style.width = width + '%';
-            if (width >= 100) {
-                clearInterval(interval);
-            }
-        }, 150);
+        // let width = 0;
+        // const interval = setInterval(() => {
+        //     width += 5;
+        //     progressBar.style.width = width + '%';
+        //     if (width >= 100) {
+        //         clearInterval(interval);
+        //     }
+        // }, 150);
 
         fetch('/build_index', {
             method: 'POST',
@@ -153,8 +153,8 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => response.json())
         .then(data => {
-            clearInterval(interval);
-            progressBar.style.width = '100%';
+            // clearInterval(interval);
+            // progressBar.style.width = '100%';
             if (data.error) {
                 alert(`Error: ${data.error}`);
             } else {
@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         })
         .catch(error => {
-            clearInterval(interval);
+            // clearInterval(interval);
             alert(`Error: ${error.message}`);
         });
     });
@@ -180,22 +180,22 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const progressBar = document.getElementById('query-progress');
-        const progressContainer = document.getElementById('query-progress-container');
+        // const progressBar = document.getElementById('query-progress');
+        // const progressContainer = document.getElementById('query-progress-container');
         
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '0%';
+        // progressContainer.style.display = 'block';
+        // progressBar.style.width = '0%';
         // document.getElementById('results-card').style.display = 'none';
 
         // Simulate progress
-        let width = 0;
-        const interval = setInterval(() => {
-            width += 5;
-            progressBar.style.width = width + '%';
-            if (width >= 100) {
-                clearInterval(interval);
-            }
-        }, 500);
+        // let width = 0;
+        // const interval = setInterval(() => {
+        //     width += 5;
+        //     progressBar.style.width = width + '%';
+        //     if (width >= 100) {
+        //         clearInterval(interval);
+        //     }
+        // }, 500);
 
         fetch('/analyse', {
             method: 'POST',
@@ -204,8 +204,8 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => response.json())
         .then(data => {
-            clearInterval(interval);
-            progressBar.style.width = '100%';
+            // clearInterval(interval);
+            // progressBar.style.width = '100%';
             if (data.error) {
                 alert(`Error: ${data.error}`);
             } else {
@@ -213,7 +213,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         })
         .catch(error => {
-            clearInterval(interval);
+            // clearInterval(interval);
             alert(`Error: ${error.message}`);
         });
     }
@@ -225,22 +225,22 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const progressBar = document.getElementById('query-progress');
-        const progressContainer = document.getElementById('query-progress-container');
+        // const progressBar = document.getElementById('query-progress');
+        // const progressContainer = document.getElementById('query-progress-container');
         
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '0%';
+        // progressContainer.style.display = 'block';
+        // progressBar.style.width = '0%';
         document.getElementById('results-card').style.display = 'none';
 
         // Simulate query progress
-        let width = 0;
-        const interval = setInterval(() => {
-            width += 10;
-            progressBar.style.width = width + '%';
-            if (width >= 100) {
-                clearInterval(interval);
-            }
-        }, 200);
+        // let width = 0;
+        // const interval = setInterval(() => {
+        //     width += 10;
+        //     progressBar.style.width = width + '%';
+        //     if (width >= 100) {
+        //         clearInterval(interval);
+        //     }
+        // }, 200);
 
         fetch('/query', {
             method: 'POST',
@@ -249,12 +249,12 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => response.json())
         .then(data => {
-            clearInterval(interval);
-            progressBar.style.width = '100%';
+            // clearInterval(interval);
+            // progressBar.style.width = '100%';
             displayResults(data);
         })
         .catch(error => {
-            clearInterval(interval);
+            // clearInterval(interval);
             alert(`Error: ${error.message}`);
         });
     }
@@ -313,7 +313,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const option = {
             title: {
                 text: 'Recall vs Sparsity',
-                left: 'center'
+                left: 'center',
+                textStyle: { fontSize: "1em" }
             },
             tooltip: {
                 trigger: 'axis'
@@ -321,22 +322,28 @@ document.addEventListener('DOMContentLoaded', function() {
             grid: {
                 left: '3%',
                 right: '4%',
-                bottom: '3%',
+                bottom: 60,
                 containLabel: true
             },
             xAxis: {
                 type: 'category',
                 name: 'Sparsity',
+                nameLocation: 'middle',
+                nameGap: 30,
+                nameTextStyle: { fontSize: "0.97em" },
                 data: recallData.map(item => item.sparsity),
                 axisTick: {
                     alignWithLabel: true
-                }
+                },
+                axisLabel: { fontSize: "0.95em" }
             },
             yAxis: {
                 type: 'value',
                 name: 'Recall',
+                nameTextStyle: { fontSize: "0.97em" },
                 min: 0,
-                max: 1
+                max: 1,
+                axisLabel: { fontSize: "0.95em" }
             },
             series: [
                 {
@@ -350,15 +357,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     label: {
                         show: true,
                         position: 'top',
+                        fontSize: "0.97em",
                         formatter: function(params) {
                             return params.value.toFixed(2);
                         }
                     }
                 }
             ]
-        };
-
-        myChart.setOption(option);
+        };        myChart.setOption(option);
         
         window.addEventListener('resize', function() {
             myChart.resize();
@@ -376,7 +382,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const option = {
             title: {
                 text: 'Inference Time Comparison',
-                left: 'center'
+                left: 'center',
+                textStyle: { fontSize: "1em" }
             },
             tooltip: {
                 trigger: 'axis',
@@ -395,11 +402,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 data: seriesData.map(item => item.name),
                 axisTick: {
                     alignWithLabel: true
-                }
+                },
+                axisLabel: { fontSize: "0.97em" }
             },
             yAxis: {
                 type: 'value',
-                name: 'Time (s)'
+                name: 'Time (s)',
+                nameTextStyle: { fontSize: "0.97em" },
+                axisLabel: { fontSize: "0.95em" }
             },
             series: [
                 {
@@ -416,7 +426,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     label: {
                         show: true,
                         position: 'top',
-                        formatter: '{c} s'
+                        fontSize: "0.97em",
+                        formatter: function(params) {
+                            return params.value.toFixed(2) + ' s';
+                        }
                     }
                 }
             ]
@@ -546,14 +559,15 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             title: {
                 text: 'Execution Profile',
-                left: 'center'
+                left: 'center',
+                textStyle: { fontSize: 18 }
             },
             dataZoom: [
                 {
                     type: 'slider',
                     filterMode: 'weakFilter',
                     showDataShadow: false,
-                    top: 350,
+                    top: 260,
                     labelFormatter: ''
                 },
                 {
@@ -562,13 +576,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             ],
             grid: {
-                height: 300,
+                height: 180,
                 top: 40
             },
             xAxis: {
                 min: 0,
                 scale: true,
                 axisLabel: {
+                    fontSize: 14,
                     formatter: function (val) {
                         return val + ' ms';
                     }
@@ -576,7 +591,8 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             yAxis: {
                 data: categories,
-                inverse: true
+                inverse: true,
+                axisLabel: { fontSize: 14 }
             },
             series: [
                 {

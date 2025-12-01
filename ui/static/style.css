@@ -8,13 +8,14 @@ body {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    font-size: 14px;
+    font-size: 16px;
+    font-weight: bold;
 }
 
 /* Layout Styles */
 .navbar {
     background: #fff;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 2px solid #3498db;
     padding: 10px 20px;
     margin-bottom: 0;
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
@@ -33,7 +34,7 @@ body {
 }
 
 .navbar p {
-    font-size: 0.9em;
+    font-size: 1em;
     color: #5a677d;
     margin: 0;
 }
@@ -42,16 +43,16 @@ body {
     display: flex;
     width: 100%;
     box-sizing: border-box;
-    gap: 15px;
-    padding: 15px;
+    gap: 10px;
+    padding: 10px;
     flex: 1;
 }
 
 .sidebar {
-    flex: 0 0 500px;
+    flex: 0 0 420px;
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 10px;
 }
 
 .content-area {
@@ -59,15 +60,15 @@ body {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 10px;
 }
 
 /* Step Cards */
 .step-card {
     background: #ffffff;
-    border: 1px solid #e2e8f0;
+    border: 2px solid #3498db;
     border-radius: 6px;
-    padding: 15px;
+    padding: 10px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }
 
@@ -84,7 +85,7 @@ body {
 .step-card p {
     color: #5a677d;
     margin-bottom: 10px;
-    font-size: 0.95em;
+    font-size: 1.1em;
 }
 
 /* Forms and Inputs */
@@ -101,7 +102,7 @@ textarea {
     padding: 8px;
     border: 1px solid #cbd5e0;
     border-radius: 4px;
-    font-size: 1.2em;
+    font-size: 1.1em;
     box-sizing: border-box;
     font-family: inherit;
 }
@@ -144,7 +145,7 @@ button, .button-group button {
     color: white;
     border: none;
     padding: 8px 15px;
-    font-size: 0.95em;
+    font-size: 1em;
     font-weight: bold;
     border-radius: 4px;
     cursor: pointer;
@@ -161,12 +162,14 @@ button:hover, .button-group button:hover {
     gap: 8px;
 }
 
+/* 
 #query-with-index {
     background-color: #2ecc71;
 }
 #query-with-index:hover {
     background-color: #27ae60;
-}
+} 
+*/
 
 #query-without-index {
     background-color: #e67e22;
@@ -209,7 +212,7 @@ button:hover, .button-group button:hover {
     margin: 0;
     font-weight: bold;
     color: #2c3e50;
-    font-size: 0.95em;
+    font-size: 1em;
 }
 
 #results-table-container {
@@ -224,13 +227,13 @@ button:hover, .button-group button:hover {
 
 #results-table th, #results-table td {
     border: 1px solid #e2e8f0;
-    padding: 8px;
+    padding: 12px;
     text-align: left;
     max-width: 180px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 0.9em;
+    font-size: 1em;
 }
 
 #results-table th {
