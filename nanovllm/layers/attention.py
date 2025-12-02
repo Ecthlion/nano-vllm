@@ -87,8 +87,17 @@ class Attention(nn.Module):
                 # Gather last q per token's sequence and compute similarity
                 q_last = q_gqa.index_select(0, last_q_idx)  # [B, num_kv_heads, head_dim]
                 q_last_per_token = q_last.index_select(0, seq_ids)  # [N, num_kv_heads, head_dim]
-                # sim per head, then mean over kv heads -> [N]
-                base_scores = (k * q_last_per_token).sum(dim=-1).mean(dim=-1)
+                # Compute per-head attention weights: softmax(qk / sqrt(d)) averaged over heads
+                logits = (k * q_last_per_token).sum(dim=-1) * self.scale  # [N, num_kv_heads]
+                attn_mean = torch.zeros(logits.size(0), device=logits.device, dtype=logits.dtype)
+                for i in range(B):
+                    s = int(cuk[i].item()); e = int(cuk[i+1].item())
+                    if e - s <= 0:
+                        continue
+                    seq_logits = logits[s:e]
+                    seq_weights = torch.softmax(seq_logits, dim=0)
+                    attn_mean[s:e] = seq_weights.mean(dim=-1)
+                base_scores = attn_mean
 
                 # Local-structure score: cosine distance between each key and the
                 # average key vector within a symmetric window (excluding itself).
@@ -135,7 +144,7 @@ class Attention(nn.Module):
                 #         cos_dist = 1 - cos_sim
                 #         seq_score = cos_dist.mean(dim=-1)
                 #         seq_score = torch.where(valid_mask, seq_score, base_scores[s:e])
-                #         cos_scores[s:e] = seq_score
+                #         cos_scores[s:e] = torch.softmax(seq_score, dim=0)
 
                 scores = base_scores
 
@@ -149,7 +158,7 @@ class Attention(nn.Module):
                     if seqlen_i <= 1:
                         pruned_locals.append(torch.empty(0, dtype=torch.int64, device=k.device))
                         continue
-                    seq_scores = scores[s + 1:e - 1]  # remove anchor token
+                    seq_scores = scores[s:e - 1]  # remove anchor token
                     k_prune = max(int(alpha * seqlen_i), 0)
                     k_prune = min(k_prune, seq_scores.numel())
                     if k_prune <= 0:
@@ -158,7 +167,6 @@ class Attention(nn.Module):
                     _, idx = torch.topk(seq_scores, k=k_prune, largest=False, sorted=False)
                     num_pruned += len(idx)
                     # store LOCAL indices within the sequence
-                    idx += 1
                     pruned_locals.append(idx)
 
                 if self.layer_id == 35:

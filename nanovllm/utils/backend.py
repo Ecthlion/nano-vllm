@@ -29,7 +29,7 @@ class BackendAPI:
     # Data Loading & Indexing
     # ------------------------------------------------------------------
     def load_data(self, data_path: str) -> dict[str, Any]:
-        df = pd.read_csv(data_path)
+        df = pd.read_csv(data_path, engine="python")
         self.data = df
         self.data_path = data_path
         self.index_ready = False
@@ -52,7 +52,7 @@ class BackendAPI:
         field: str | None = None,
         limit: int | None = 1000,
         no_pruning=False,
-        virtual_intent: str = "The key entities and summary of above text are:\n"
+        virtual_intent: str = "The key entities and summary of above text are:\n",
     ) -> dict[str, Any]:
         self._ensure_data_loaded()
         field = field or self.text_field
@@ -82,7 +82,7 @@ class BackendAPI:
         for idx, row in subset.iterrows():
             text_id = idx
             text = str(row[field])
-            prompt = f"{text}\n"
+            prompt = f"{text} "
             samples.append((text_id, prompt))  # type: ignore
 
         sp = SamplingParams(
@@ -134,7 +134,9 @@ class BackendAPI:
         """
         # Use a regex to robustly extract the prompt and the target. DOTALL
         # allows the prompt to contain newlines.
-        m = re.search(r"LLM\((?P<prompt>.*?)\)\s*==\s*(?P<target>.+)$", query, flags=re.DOTALL)
+        m = re.search(
+            r"LLM\((?P<prompt>.*?)\)\s*==\s*(?P<target>.+)$", query, flags=re.DOTALL
+        )
         if not m:
             raise ValueError("Invalid query format")
 
@@ -336,7 +338,7 @@ class BackendAPI:
             context_value = (
                 str(row_dict.get(self.text_field, "")) if self.text_field else ""
             )
-            full_prompt = f"{context_value}\n{base_prompt}"
+            full_prompt = f"{context_value} {base_prompt}"
             tuple_prompts.append((int(idx), full_prompt))  # type: ignore
 
         sp = SamplingParams(
@@ -414,11 +416,9 @@ class BackendAPI:
         recall_series = []
 
         # for s in [0.6, 0.7, 0.8, 0.9, 0.99]:
-        for s in [0.05, 0.7, 0.9]:
+        for s in [0.5, 0.7, 0.8, 0.9]:
             set_all_seeds(42)
-            self.build_index(
-                s, self.text_field, limit, False  # type: ignore
-            )
+            self.build_index(s, self.text_field, limit, False)  # type: ignore
             set_all_seeds(42)
             outputs_s = self.llm.generate(
                 tuple_prompts,
@@ -429,10 +429,10 @@ class BackendAPI:
                 sparsity=s,
                 optimize=True,
             )
-            
+
             current = [output["text"] for output in outputs_s]
             print(f"{current[:10]}")
-            
+
             total = 0
             same = 0
 
@@ -453,7 +453,7 @@ class BackendAPI:
             accuracy = same / total
             recall = cur_yes / base_yes
             print(same, total, cur_yes, base_yes)
-            
+
             recall_series.append({"sparsity": s, "recall": accuracy})
             self.llm.scheduler.block_manager.reset()
             print(f"Sparsity {s}, Accuracy {accuracy:.2f}, Recall {recall:.2f}")

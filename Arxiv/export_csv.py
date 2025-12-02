@@ -30,6 +30,13 @@ def main():
             print(f"Removing columns from {split_name}: {cols_to_remove}")
             ds = ds.remove_columns(cols_to_remove)
 
+        # Keep only rows whose abstract has at least 1500 characters
+        print(f"Filtering {split_name} for abstract length > 1500...")
+        ds = ds.filter(
+            lambda example: example.get("paperAbstract") is not None
+            and len(example["paperAbstract"]) > 1000
+        )
+
         # Randomly select 100,000 rows if dataset is larger than that
         if len(ds) > 100000:
             print(
