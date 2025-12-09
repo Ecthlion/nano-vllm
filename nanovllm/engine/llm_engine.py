@@ -115,7 +115,7 @@ class LLMEngine:
         self.scheduler.add(seq)
 
     def _start_prefetcher(self):
-        self._prefetch_queue: Queue = Queue(maxsize=8)
+        self._prefetch_queue: Queue = Queue(maxsize=4)
 
         def _prefetch_loop():
             prefetch_stream = torch.cuda.Stream()
@@ -328,7 +328,7 @@ class LLMEngine:
             if optimize:
                 self._start_prefetcher()
             else:
-                self._prefetch_queue: Queue = Queue(maxsize=8)
+                self._prefetch_queue: Queue = Queue(maxsize=4)
             self._start_storer()
         outputs = {}
         prefill_throughput = decode_throughput = 0.0

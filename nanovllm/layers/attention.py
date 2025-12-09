@@ -70,6 +70,7 @@ class Attention(nn.Module):
                 and context.block_tables is None
                 and context.cu_seqlens_q is not None
                 and context.cu_seqlens_k is not None
+                and self.layer_id == 35
             ):
                 # Vectorized pruning index discovery on packed sequences.
                 group_size = self.num_heads // self.num_kv_heads
@@ -87,17 +88,16 @@ class Attention(nn.Module):
                 # Gather last q per token's sequence and compute similarity
                 q_last = q_gqa.index_select(0, last_q_idx)  # [B, num_kv_heads, head_dim]
                 q_last_per_token = q_last.index_select(0, seq_ids)  # [N, num_kv_heads, head_dim]
-                # Compute per-head attention weights: softmax(qk / sqrt(d)) averaged over heads
-                logits = (k * q_last_per_token).sum(dim=-1) * self.scale  # [N, num_kv_heads]
-                attn_mean = torch.zeros(logits.size(0), device=logits.device, dtype=logits.dtype)
-                for i in range(B):
-                    s = int(cuk[i].item()); e = int(cuk[i+1].item())
-                    if e - s <= 0:
-                        continue
-                    seq_logits = logits[s:e]
-                    seq_weights = torch.softmax(seq_logits, dim=0)
-                    attn_mean[s:e] = seq_weights.mean(dim=-1)
-                base_scores = attn_mean
+                logits = (k * q_last_per_token).sum(dim=-1).mean(dim=-1) * self.scale
+                # attn_mean = torch.zeros(logits.size(0), device=logits.device, dtype=logits.dtype)
+                # for i in range(B):
+                #     s = int(cuk[i].item()); e = int(cuk[i+1].item())
+                #     if e - s <= 0:
+                #         continue
+                #     seq_logits = logits[s:e]
+                #     seq_weights = torch.softmax(seq_logits, dim=0)
+                #     attn_mean[s:e] = seq_weights.mean(dim=-1)
+                base_scores = logits
 
                 # Local-structure score: cosine distance between each key and the
                 # average key vector within a symmetric window (excluding itself).
@@ -160,7 +160,7 @@ class Attention(nn.Module):
                         continue
                     seq_scores = scores[s:e - 1]  # remove anchor token
                     k_prune = max(int(alpha * seqlen_i), 0)
-                    k_prune = min(k_prune, seq_scores.numel())
+                    k_prune = min(k_prune, seq_scores.numel() - 1)
                     if k_prune <= 0:
                         pruned_locals.append(torch.empty(0, dtype=torch.int64, device=k.device))
                         continue
@@ -169,15 +169,15 @@ class Attention(nn.Module):
                     # store LOCAL indices within the sequence
                     pruned_locals.append(idx)
 
-                if self.layer_id == 35:
-                    print(f"[pruned][layer {self.layer_id}] {num_pruned} tokens")
+                print(f"[pruned][layer {self.layer_id}] {num_pruned} tokens")
 
                 # Stash into global context for later stages (KV cache store/persist)
                 if context.pruned_local_indices is None:
                     context.pruned_local_indices = []
                 while len(context.pruned_local_indices) <= self.layer_id:
                     context.pruned_local_indices.append([])
-                context.pruned_local_indices[self.layer_id] = pruned_locals
+                for i in range(36):
+                    context.pruned_local_indices[i] = pruned_locals
 
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache

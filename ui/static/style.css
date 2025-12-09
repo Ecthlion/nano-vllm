@@ -8,7 +8,7 @@ body {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    font-size: 16px;
+    font-size: 18px;
     font-weight: bold;
 }
 
@@ -16,8 +16,8 @@ body {
 .navbar {
     background: #fff;
     border-bottom: 2px solid #3498db;
-    padding: 3px 6px;
-    margin-bottom: 0;
+    padding: 4px 5px;
+    /* margin-bottom: 5px; */
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     flex-shrink: 0;
 }
@@ -28,13 +28,13 @@ body {
 }
 
 .navbar h1 {
-    font-size: 1.5em;
+    font-size: 1.6em;
     color: #2c3e50;
-    margin: 0 0 2px 0;
+    margin: 0 0 0 0;
 }
 
 .navbar p {
-    font-size: 1em;
+    font-size: 1.25em;
     color: #5a677d;
     margin: 0;
 }
@@ -44,16 +44,16 @@ body {
     width: 100%;
     height: 80%;
     box-sizing: border-box;
-    gap: 10px;
-    padding: 10px;
+    gap: 8px;
+    padding: 8px;
     flex: 1;
 }
 
 .sidebar {
-    flex: 0 0 420px;
+    flex: 0 0 530px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
 }
 
 .content-area {
@@ -61,7 +61,7 @@ body {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
 }
 
 /* Step Cards */
@@ -69,42 +69,47 @@ body {
     background: #ffffff;
     border: 2px solid #3498db;
     border-radius: 6px;
-    padding: 10px;
+    padding: 8px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }
 
 .step-card h2 {
-    font-size: 1.2em;
+    font-size: 1.4em;
     color: #2c3e50;
     margin-top: 0;
-    margin-bottom: 10px;
+    margin-bottom: 5px;
     border-bottom: 2px solid #3498db;
-    padding-bottom: 2px;
+    /* padding-bottom: 2px; */
     display: inline-block;
 }
 
 .step-card p {
     color: #5a677d;
-    margin-top: 5px;
-    margin-bottom: 10px;
-    font-size: 1.1em;
+    margin-top: 0;
+    margin-bottom: 5px;
+    font-size: 1.25em;
 }
 
 /* Forms and Inputs */
 form {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
+}
+
+#index-form {
+    gap: 2px;
 }
 
 input[type="file"],
 input[type="text"],
 textarea {
     width: 100%;
-    padding: 8px;
+    padding: 5px;
     border: 1px solid #cbd5e0;
     border-radius: 4px;
-    font-size: 1.1em;
+    font-size: 1.25em;
+    font-weight: bold;
     box-sizing: border-box;
     font-family: inherit;
 }
@@ -125,7 +130,7 @@ textarea {
     color: white;
     border: none;
     padding: 8px 12px;
-    font-size: 0.9em;
+    font-size: 1.25em;
     border-radius: 4px;
     cursor: pointer;
     white-space: nowrap;
@@ -146,8 +151,8 @@ button, .button-group button {
     background-color: #3498db;
     color: white;
     border: none;
-    padding: 8px 15px;
-    font-size: 1em;
+    padding: 8px 12px;
+    font-size: 1.25em;
     font-weight: bold;
     border-radius: 4px;
     cursor: pointer;
@@ -180,13 +185,17 @@ button:hover, .button-group button:hover {
     background-color: #d35400;
 }
 
+#query-input {
+    font-size: 1.15em;
+}
+
 
 /* Progress Bar */
 .progress-bar-container {
     width: 100%;
     background-color: #e2e8f0;
     border-radius: 4px;
-    margin-top: 10px;
+    margin-top: 5px;
     overflow: hidden;
 }
 
@@ -207,14 +216,14 @@ button:hover, .button-group button:hover {
     background: #ecf0f1;
     padding: 5px;
     border-radius: 4px;
-    margin-bottom: 5px;
+    margin-bottom: 2px;
 }
 
 #results-info p {
     margin: 0;
     font-weight: bold;
     color: #2c3e50;
-    font-size: 1em;
+    font-size: 1.25em;
 }
 
 #results-table-container {
@@ -224,7 +233,7 @@ button:hover, .button-group button:hover {
 #results-table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 5px;
+    margin-top: 2px;
 }
 
 #results-table th, #results-table td {
@@ -235,7 +244,7 @@ button:hover, .button-group button:hover {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 1em;
+    font-size: 1.25em;
 }
 
 #results-table th {
@@ -257,3 +266,10 @@ button:hover, .button-group button:hover {
     margin-top: 5px;
     position: relative;
 }
+
+.chart-card {
+    display: flex;
+    justify-content: center; /* 水平居中 */
+    align-items: center;     /* 垂直居中 */
+}
+

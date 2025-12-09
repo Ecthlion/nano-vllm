@@ -273,7 +273,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Display inference time
         document.getElementById('inference-time').textContent = data.inference_time;
-        document.getElementById('total-results').textContent = data.results.length;
+        document.getElementById('total-results').textContent = `${data.results.length} / ${data.metadata.total_rows}`;
 
         currentResults = data.results;
         currentPage = 1;
@@ -312,9 +312,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const option = {
             title: {
-                text: 'Recall vs Sparsity',
+                text: 'Accuracy vs Sparsity',
                 left: 'center',
-                textStyle: { fontSize: "1em" }
+                textStyle: { fontSize: "1.3em" }
             },
             tooltip: {
                 trigger: 'axis'
@@ -330,24 +330,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 name: 'Sparsity',
                 nameLocation: 'middle',
                 nameGap: 30,
-                nameTextStyle: { fontSize: "0.97em" },
+                nameTextStyle: { fontSize: "1.1em" },
                 data: recallData.map(item => item.sparsity),
                 // axisTick: {
                 //     alignWithLabel: true
                 // },
-                axisLabel: { fontSize: "0.95em" }
+                axisLabel: { fontSize: "1em" }
             },
             yAxis: {
                 type: 'value',
-                name: 'Recall',
-                nameTextStyle: { fontSize: "0.97em" },
+                name: '  Accuracy\n',
+                nameTextStyle: { fontSize: "1.1em" },
                 min: 0,
                 max: 1,
-                axisLabel: { fontSize: "0.95em" }
+                axisLabel: { fontSize: "1em" }
             },
             series: [
                 {
-                    name: 'Recall',
+                    name: 'Accuracy',
                     type: 'line',
                     data: recallData.map(item => item.recall),
                     smooth: true,
@@ -357,7 +357,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     label: {
                         show: true,
                         position: 'top',
-                        fontSize: "0.97em",
+                        fontSize: "1.1em",
                         formatter: function(params) {
                             return params.value.toFixed(2);
                         }
@@ -383,7 +383,7 @@ document.addEventListener('DOMContentLoaded', function() {
             title: {
                 text: 'Inference Time Comparison',
                 left: 'center',
-                textStyle: { fontSize: "1em" }
+                textStyle: { fontSize: "1.3em" }
             },
             tooltip: {
                 trigger: 'axis',
@@ -403,13 +403,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 axisTick: {
                     alignWithLabel: true
                 },
-                axisLabel: { fontSize: "0.97em" }
+                axisLabel: { fontSize: "1.1em" }
             },
             yAxis: {
                 type: 'value',
-                name: 'Time (s)',
-                nameTextStyle: { fontSize: "0.97em" },
-                axisLabel: { fontSize: "0.95em" }
+                name: '  Time (s)\n',
+                nameTextStyle: { fontSize: "1.1em" },
+                axisLabel: { fontSize: "1em" }
             },
             series: [
                 {
@@ -426,7 +426,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     label: {
                         show: true,
                         position: 'top',
-                        fontSize: "0.97em",
+                        fontSize: "1.1em",
                         formatter: function(params) {
                             return params.value.toFixed(2) + ' s';
                         }
@@ -546,7 +546,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     type: 'rect',
                     transition: ['shape'],
                     shape: rectShape,
-                    style: api.style()
+                    style: {
+                        ...api.style(),
+                        stroke: '#000',
+                        lineWidth: 1
+                    }
                 }
             );
         }
@@ -554,13 +558,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const option = {
             tooltip: {
                 formatter: function (params) {
-                    return params.marker + params.name + ': ' + params.value[3].toFixed(2) + ' ms';
+                    return params.marker + params.name + ': ' + params.value[3].toFixed(4) + ' s';
                 }
             },
             title: {
                 text: 'Execution Profile',
                 left: 'center',
-                textStyle: { fontSize: "1em" }
+                textStyle: { fontSize: "1.3em" }
             },
             dataZoom: [
                 {
@@ -583,16 +587,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 min: 0,
                 scale: true,
                 axisLabel: {
-                    fontSize: "0.95em",
+                    fontSize: "1em",
                     formatter: function (val) {
-                        return val + ' ms';
+                        return val + ' s';
                     }
                 }
             },
             yAxis: {
                 data: categories,
                 inverse: true,
-                axisLabel: { fontSize: "0.97em" }
+                axisLabel: { fontSize: "1.1em" }
             },
             series: [
                 {

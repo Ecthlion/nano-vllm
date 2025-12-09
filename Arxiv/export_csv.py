@@ -30,11 +30,21 @@ def main():
             print(f"Removing columns from {split_name}: {cols_to_remove}")
             ds = ds.remove_columns(cols_to_remove)
 
-        # Keep only rows whose abstract has at least 1500 characters
-        print(f"Filtering {split_name} for abstract length > 1500...")
+        # Keep only rows whose abstract has at least 1500 characters and Computer Science field
+        print(
+            f"Filtering {split_name} for abstract length > 1500 and fieldsOfStudy == ['Computer Science']..."
+        )
         ds = ds.filter(
-            lambda example: example.get("paperAbstract") is not None
-            and len(example["paperAbstract"]) > 1000
+            lambda example: (
+                example.get("paperAbstract") is not None
+                and len(example["paperAbstract"]) > 1500
+                and example.get("fieldsOfStudy") is not None
+                and (
+                    example["fieldsOfStudy"] == ["Computer Science"]
+                    # "Computer Science" in example["fieldsOfStudy"]
+                    # or "Medicine" in example["fieldsOfStudy"]
+                )
+            )
         )
 
         # Randomly select 100,000 rows if dataset is larger than that
@@ -42,7 +52,7 @@ def main():
             print(
                 f"Shuffling and selecting 100,000 rows from {split_name} (total: {len(ds)})..."
             )
-            ds = ds.shuffle(seed=42).select(range(100000))
+            ds = ds.shuffle().select(range(100000))
         else:
             print(f"Dataset {split_name} has {len(ds)} rows (<= 100,000), keeping all.")
 

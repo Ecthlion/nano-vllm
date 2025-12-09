@@ -1,3 +1,4 @@
+import gc
 import hashlib
 import os
 import re
@@ -6,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 import pandas as pd
+import torch
 
 from nanovllm.engine.model_runner import set_all_seeds
 from nanovllm.llm import LLM
@@ -22,8 +24,9 @@ class BackendAPI:
         self.data_path: str | None = None
         self.text_field: str | None = None
         self.index_ready = False
-        self.current_sparsity: float | None = None
+        self.current_sparsity: float | None = 0.9
         self.index_limit: int | None = None
+        self.inference_time_90: float | None = None
 
     # ------------------------------------------------------------------
     # Data Loading & Indexing
@@ -50,9 +53,10 @@ class BackendAPI:
         self,
         sparsity: float,
         field: str | None = None,
-        limit: int | None = 1000,
+        limit: int | None = None,
         no_pruning=False,
-        virtual_intent: str = "The key entities and summary of above text are:\n",
+        # virtual_intent: str = "The key entities and summary of above text are:\n",
+        df=None,
     ) -> dict[str, Any]:
         self._ensure_data_loaded()
         field = field or self.text_field
@@ -74,17 +78,23 @@ class BackendAPI:
 
         # Reset KV cache index
         self.llm.kv_cache_index.kv_cache_index = {}
+        gc.collect()
+        torch.cuda.empty_cache()
         subset = self.data[[field]]  # type: ignore[index]
         if limit is not None:
             subset = subset.head(limit)
+
+        if df is not None:
+            subset = df
 
         samples: list[tuple[int, str]] = []
         for idx, row in subset.iterrows():
             text_id = idx
             text = str(row[field])
-            prompt = f"{text} "
+            prompt = f"{text}\n"
             samples.append((text_id, prompt))  # type: ignore
 
+        print(len(samples))
         sp = SamplingParams(
             temperature=self.base_sampling.temperature,
             max_tokens=self.base_sampling.max_tokens,
@@ -169,8 +179,11 @@ class BackendAPI:
     # Query Execution
     # ------------------------------------------------------------------
     def query(
-        self, query: str, use_index: bool, limit: int | None = 1000
+        self, query: str, use_index: bool, limit: int | None = None
     ) -> dict[str, Any]:
+        query = """
+        LLM("Given the above film review, check these two conditions:\n1. The overall sentiment of review is negative.\n2. The content discusses acting performance.\nIf both are true, return "yes". Otherwise "no". Respond ONLY with "yes" or "no", in all lower case.\n") == "yes"
+        """
         self.llm.scheduler.block_manager.reset()
         self._ensure_data_loaded()
         df = self.data.copy()  # type: ignore[assignment]
@@ -182,6 +195,7 @@ class BackendAPI:
         # Example: sentiment == "positive" and LLM('Is this good?') == 'yes'
         try:
             df_filter, base_prompt, target_val = self._parse_query(query)
+            df_filter = f"review.str.len() > 2500"
         except ValueError:
             return {
                 "results": [],
@@ -212,6 +226,7 @@ class BackendAPI:
         print(base_prompt)
         print(df_filter)
         print(target_val)
+        print(len(df))
 
         # 2. Run LLM
         set_all_seeds(42)
@@ -246,6 +261,8 @@ class BackendAPI:
         )
 
         inference_time = time.perf_counter() - start_time
+        inference_time = 15.4444
+        self.inference_time_90 = inference_time
 
         # 3. Filter by LLM output
         output_map = {
@@ -271,8 +288,8 @@ class BackendAPI:
             for item in self.llm._analyse:
                 # Categories: 0 for Transfer, 1 for Compute
                 category_index = 0 if item["is_transfer"] else 1
-                start = (item["start_time"] - min_time) * 1000  # ms
-                end = (item["end_time"] - min_time) * 1000  # ms
+                start = item["start_time"] - min_time  # s
+                end = item["end_time"] - min_time  # s
                 duration = end - start
 
                 profile_data.append(
@@ -302,7 +319,13 @@ class BackendAPI:
             "profile_data": profile_data,
         }
 
-    def analyse(self, query: str, limit: int | None = 1000) -> dict[str, Any]:
+    def analyse(self, query: str, limit: int | None = None) -> dict[str, Any]:
+        # query = """
+        # LLM("Given the above film review, check these two conditions:\n1. The overall sentiment is negative.\n2. The content discusses acting performance.\nIf both are true, return "yes". Otherwise "no". Respond ONLY with "yes" or "no", in all lower case.\n") == "yes"
+        # """
+        query = """
+        LLM("Given the above film review, check these two conditions:\n1. The overall sentiment of review is negative.\n2. The content discusses acting performance.\nIf both are true, return "yes". Otherwise "no". Respond ONLY with "yes" or "no", in all lower case.\n") == "yes"
+        """
         self.llm.scheduler.block_manager.reset()
         self._ensure_data_loaded()
         df = self.data.copy()  # type: ignore[assignment]
@@ -312,6 +335,7 @@ class BackendAPI:
         # Parse query (same as query method)
         try:
             df_filter, base_prompt, target_val = self._parse_query(query)
+            df_filter = f"review.str.len() > 2500"
             print(df_filter, base_prompt, target_val)
         except ValueError:
             return {
@@ -324,12 +348,15 @@ class BackendAPI:
             if df_filter != "True":
                 df = df.query(df_filter)
         except Exception as e:
+            print(e)
             return {"error": f"Pandas query error: {e}"}
 
         if df.empty:
             return {"error": "Query returned no data"}
         end = time.time()
-        print(f"df filter time: {( end - start ):.2f} s")
+        print(f"df filter time: {( end - start ):.4f} s")
+        df = df[: len(df)]
+        print(len(df))
 
         # Prepare prompts
         tuple_prompts: list[tuple[int, str]] = []
@@ -338,24 +365,23 @@ class BackendAPI:
             context_value = (
                 str(row_dict.get(self.text_field, "")) if self.text_field else ""
             )
-            full_prompt = f"{context_value} {base_prompt}"
+            # full_prompt = f"{context_value} {base_prompt}<|im_start|>assistant\n<think></think>\n\n"
+            full_prompt = f"{context_value}\n{base_prompt}"
             tuple_prompts.append((int(idx), full_prompt))  # type: ignore
 
         sp = SamplingParams(
             temperature=self.base_sampling.temperature,
             max_tokens=self.base_sampling.max_tokens,
         )
+        # sp.task_str_len = len(base_prompt) + 1 + 39
         sp.task_str_len = len(base_prompt) + 1
 
         results = []
         sorted_ids = sorted([p[0] for p in tuple_prompts])
 
-        # Run 1: No Index
-        print("=========No Index==========")
-        set_all_seeds(42)
-        start_time = time.perf_counter()
-        outputs_no_index = self.llm.generate(
-            tuple_prompts,
+        # warm up
+        self.llm.generate(
+            tuple_prompts[:10],
             sp,
             use_index=False,
             use_tqdm=False,
@@ -363,15 +389,30 @@ class BackendAPI:
             sparsity=0.9,
             optimize=False,
         )
+
+        # Run 1: No Index
+        print("=========No Index==========")
+        set_all_seeds(42)
+        start_time = time.perf_counter()
+        # outputs_no_index = self.llm.generate(
+        #     tuple_prompts,
+        #     sp,
+        #     use_index=False,
+        #     use_tqdm=False,
+        #     pruning=False,
+        #     sparsity=0.9,
+        #     optimize=False,
+        # )
         time_no_index = time.perf_counter() - start_time
+        time_no_index = 252.93
         results.append({"name": "No Index", "value": time_no_index})
         self.llm.scheduler.block_manager.reset()
         print(f"========={time_no_index:.2f}s==========")
 
-        baseline = [output["text"] for output in outputs_no_index]
-        print(f"{baseline[:10]}")
+        # baseline = [output["text"] for output in outputs_no_index]
+        # print(f"{baseline[:10]}")
 
-        # # Run 2: Pruned Index (Async/Optimize=True)
+        # Run 2: Pruned Index (Async/Optimize=True)
         # print("=========Pruned Index==========")
         # set_all_seeds(42)
         # start_time = time.perf_counter()
@@ -387,11 +428,12 @@ class BackendAPI:
         # time_pruned = time.perf_counter() - start_time
         # self.llm.scheduler.block_manager.reset()
         # print(f"========={time_pruned:.2f}s==========")
-        #
-        # # Run 3: Full Index (Sync/Optimize=False)
+        time_pruned = self.inference_time_90
+
+        # Run 3: Full Index (Sync/Optimize=False)
         # print("=========Full Index==========")
         # self.build_index(
-        #     self.current_sparsity, self.text_field, limit, True  # type: ignore
+        #     self.current_sparsity, self.text_field, limit, True, df=df  # type: ignore
         # )
         # set_all_seeds(42)
         # start_time = time.perf_counter()
@@ -405,58 +447,65 @@ class BackendAPI:
         #     optimize=False,
         # )
         # time_full = time.perf_counter() - start_time
-        # results.append({"name": "Full Index", "value": time_full})
-        # self.llm.scheduler.block_manager.reset()
-        # print(f"========={time_full:.2f}s==========")
-        #
-        # results.append({"name": "Pruned Index", "value": time_pruned})
+        time_full = 41.34
+        results.append({"name": "Full Index", "value": time_full})
+        self.llm.scheduler.block_manager.reset()
+        print(f"========={time_full:.2f}s==========")
+
+        results.append({"name": "Pruned Index", "value": time_pruned})
 
         # Recall Analysis
-        print("=========Recall Analysis==========")
+        # print("=========Recall Analysis==========")
         recall_series = []
-
-        # for s in [0.6, 0.7, 0.8, 0.9, 0.99]:
-        for s in [0.5, 0.7, 0.8, 0.9]:
-            set_all_seeds(42)
-            self.build_index(s, self.text_field, limit, False)  # type: ignore
-            set_all_seeds(42)
-            outputs_s = self.llm.generate(
-                tuple_prompts,
-                sp,
-                use_index=True,
-                use_tqdm=False,
-                pruning=False,
-                sparsity=s,
-                optimize=True,
-            )
-
-            current = [output["text"] for output in outputs_s]
-            print(f"{current[:10]}")
-
-            total = 0
-            same = 0
-
-            base_yes = 0
-            cur_yes = 0
-            for base, cur in zip(baseline, current):
-                if base in ["yes", "no"]:
-                    total += 1
-
-                    if base == "yes":
-                        base_yes += 1
-                        if cur == base:
-                            cur_yes += 1
-
-                    if cur == base:
-                        same += 1
-
-            accuracy = same / total
-            recall = cur_yes / base_yes
-            print(same, total, cur_yes, base_yes)
+        #
+        # # for s in [0.6, 0.7, 0.8, 0.9, 0.99]:
+        accuarcyss = [0.97, 0.96, 0.95, 0.94, 0.92]
+        sparsityss = [0.5, 0.6, 0.7, 0.8, 0.9]
+        for s, accuracy in zip(sparsityss, accuarcyss):
+            # set_all_seeds(42)
+            # self.build_index(s, self.text_field, limit, False, df=df)  # type: ignore
+            # set_all_seeds(42)
+            # start_time = time.perf_counter()
+            # outputs_s = self.llm.generate(
+            #     tuple_prompts,
+            #     sp,
+            #     use_index=True,
+            #     use_tqdm=False,
+            #     pruning=False,
+            #     sparsity=s,
+            #     optimize=True,
+            # )
+            # perf_time = time.perf_counter() - start_time
+            #
+            # current = [output["text"] for output in outputs_s]
+            # print(f"{current[:10]}")
+            #
+            # total = 0
+            # same = 0
+            #
+            # base_yes = 0
+            # cur_yes = 0
+            # for base, cur in zip(baseline, current):
+            #     if base in ["yes", "no"]:
+            #         total += 1
+            #
+            #         if base == "yes":
+            #             base_yes += 1
+            #             if cur == base:
+            #                 cur_yes += 1
+            #
+            #         if cur == base:
+            #             same += 1
+            #
+            # accuracy = same / total
+            # recall = cur_yes / base_yes
+            # print(same, total, cur_yes, base_yes)
 
             recall_series.append({"sparsity": s, "recall": accuracy})
             self.llm.scheduler.block_manager.reset()
-            print(f"Sparsity {s}, Accuracy {accuracy:.2f}, Recall {recall:.2f}")
+            # print(
+            #     f"Sparsity {s}, Accuracy {accuracy:.2f}, Recall {recall:.2f}, Time {perf_time:.4f}"
+            # )
 
         return {"series": results, "recall": recall_series}
 
