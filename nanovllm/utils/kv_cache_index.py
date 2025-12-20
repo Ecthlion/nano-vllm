@@ -2,10 +2,18 @@ import os
 from threading import Event
 from typing import Optional
 
-import numpy as np
 import torch
 
 from nanovllm.engine.sequence import Sequence
+
+try:
+    import kvikio  # type: ignore
+    from kvikio import CuFile  # type: ignore
+
+    _HAS_GDS = True
+except Exception:
+    _HAS_GDS = False
+    CuFile = None  # type: ignore
 
 
 class KVCacheIndex:
@@ -14,8 +22,18 @@ class KVCacheIndex:
         # Tensor[2, num_layers, num_blocks, block_size, num_kv_heads, head_dim]
         self.gpu_kv_cache = gpu_kv_cache
 
-        self.save_dir = "/data/zwt/"
+        self.save_dir = os.environ.get("NANOVLLM_KV_DIR", "/data/zwt/")
         self.index_name = index_name
+        self.use_gds = (
+            os.environ.get("NANOVLLM_USE_GPUDIRECT", "0") == "1" and _HAS_GDS
+        )
+        self.force_gds = os.environ.get("NANOVLLM_FORCE_GPUDIRECT", "0") == "1"
+
+        if not os.path.isdir(self.save_dir):
+            os.makedirs(self.save_dir, exist_ok=True)
+        self.gds_dir = os.path.join(self.save_dir, "kv_cache_gds")
+        if self.use_gds:
+            os.makedirs(self.gds_dir, exist_ok=True)
 
         path = f"{self.save_dir}{self.index_name}"
 
@@ -34,8 +52,13 @@ class KVCacheIndex:
             # pin memory when init
             for _, item in list(self.kv_cache_index.items()):
                 kv = item.get("kv")
-                if isinstance(kv, torch.Tensor) and not kv.is_pinned():
-                    item["kv"] = kv.pin_memory()
+                if isinstance(kv, torch.Tensor):
+                    if not kv.is_pinned():
+                        item["kv"] = kv.pin_memory()
+                # legacy files may not include kv shape/dtype metadata
+                if "kv" in item:
+                    item.setdefault("kv_shape", tuple(item["kv"].shape))  # type: ignore
+                    item.setdefault("kv_dtype", str(item["kv"].dtype))  # type: ignore
 
     def store_kv_cache(
         self,
@@ -141,8 +164,14 @@ class KVCacheIndex:
                 text_tokens_pruned = [seq.token_ids[i] for i in kept_local_indices]
 
                 self.dirty = True
+                kv_path = None
+                if self.use_gds:
+                    kv_path = self._dump_kv_to_gds(seq.text_id, cpu_kv_cache)
                 self.kv_cache_index[seq.text_id] = {
                     "kv": cpu_kv_cache,
+                    "kv_path": kv_path,
+                    "kv_shape": tuple(cpu_kv_cache.shape),
+                    "kv_dtype": str(cpu_kv_cache.dtype),
                     "pruning_len": len(first_layer_pruned),
                     "text_tokens_pruned": text_tokens_pruned,
                 }
@@ -190,7 +219,24 @@ class KVCacheIndex:
                 if item is None:
                     continue
                 # Support legacy tensor or new dict format
-                cpu_kv_cache = item.get("kv")
+                cpu_kv_cache = item.get("kv") if not self.force_gds else None
+                if cpu_kv_cache is None and "gds_cache" in item:
+                    cpu_kv_cache = item.get("gds_cache")
+                kv_path = item.get("kv_path")
+                # Prefer GPUDirect when enabled and metadata exists
+                if self.use_gds and kv_path is not None:
+                    gpu_cache = self._load_kv_with_gds(
+                        kv_path,
+                        item.get("kv_shape"),
+                        item.get("kv_dtype"),
+                        stream,
+                    )
+                    if gpu_cache is not None:
+                        item["gds_cache"] = gpu_cache
+                        cpu_kv_cache = gpu_cache
+
+                if cpu_kv_cache is None:
+                    continue
 
                 # Only copy tokens that aren't already cached (full blocks only)
                 start_token = seq.num_cached_tokens
@@ -243,8 +289,69 @@ class KVCacheIndex:
         print("[persistence]")
         if self.dirty:
             path = f"{self.save_dir}{self.index_name}"
-            torch.save(self.kv_cache_index, path)
+            serializable_index: dict = {}
+            for text_id, item in self.kv_cache_index.items():
+                to_save = dict(item)
+                # Drop GPU-resident cache before persisting
+                to_save.pop("gds_cache", None)
+                if self.use_gds and "kv_path" in to_save:
+                    # avoid serializing full tensor when GPUDirect file exists
+                    to_save.pop("kv", None)
+                serializable_index[text_id] = to_save
+
+            torch.save(serializable_index, path)
         self.dirty = False
+
+    def _dump_kv_to_gds(self, text_id: str | int, cpu_kv_cache: torch.Tensor):
+        """
+        Persist KV tensor as a raw binary so it can be loaded via GPUDirect Storage.
+        """
+        os.makedirs(self.gds_dir, exist_ok=True)
+        kv_path = os.path.join(self.gds_dir, f"{text_id}.bin")
+        contiguous = cpu_kv_cache.contiguous()
+        with open(kv_path, "wb") as f:
+            f.write(contiguous.numpy().tobytes())
+        return kv_path
+
+    def _load_kv_with_gds(
+        self,
+        kv_path: Optional[str],
+        kv_shape: Optional[tuple],
+        kv_dtype: Optional[str],
+        stream: torch.cuda.Stream,
+    ):
+        """
+        Load KV tensor directly into GPU memory via GPUDirect Storage.
+        Falls back to None if GDS is unavailable or metadata is missing.
+        """
+        if not (_HAS_GDS and kv_path and kv_shape and kv_dtype):
+            return None
+
+        if isinstance(kv_shape, list):
+            kv_shape = tuple(kv_shape)
+
+        dtype = getattr(torch, str(kv_dtype).split(".")[-1], None)
+        if dtype is None:
+            return None
+
+        with torch.cuda.stream(stream):
+            gpu_tensor = torch.empty(
+                tuple(kv_shape), dtype=dtype, device=self.gpu_kv_cache.device
+            )
+            try:
+                with CuFile(kv_path, "r") as f:  # type: ignore
+                    expected = gpu_tensor.numel() * gpu_tensor.element_size()
+                    read_n = f.readinto(gpu_tensor)  # type: ignore
+                    if read_n != expected:
+                        raise IOError(
+                            f"GPUDirect read truncated: expected {expected}, got {read_n}"
+                        )
+            except Exception as exc:  # pragma: no cover - GPUDirect may be unavailable in CI
+                print(f"[kv_cache_index] GPUDirect read failed for {kv_path}: {exc}")
+                return None
+
+        # Cache the GPU tensor for reuse
+        return gpu_tensor
 
 
 # Triton can only load GPU memory, so useless for now
