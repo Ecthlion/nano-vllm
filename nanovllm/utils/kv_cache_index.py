@@ -43,6 +43,7 @@ class KVCacheIndex:
         #   "kv": Tensor[2, num_layers, seq_len_post_prune, num_kv_heads, head_dim],
         #   "pruning_len": int,                       # number of pruned text tokens (layer 0 reference)
         #   "text_tokens_pruned": list[int] | None    # text tokens after pruning (layer 0 reference)
+        #   "ilh_bounds": {"core": int, "important": int, "optional": int}
         # }
         self.kv_cache_index: dict = {}
         if os.path.isfile(path):
@@ -162,6 +163,14 @@ class KVCacheIndex:
                     if i not in first_layer_pruned_set
                 ]
                 text_tokens_pruned = [seq.token_ids[i] for i in kept_local_indices]
+                core_tokens = max(1, int(post_prune_len * 0.70))
+                important_tokens = max(core_tokens, int(post_prune_len * 0.85))
+                important_tokens = min(important_tokens, post_prune_len)
+                ilh_bounds = {
+                    "core": core_tokens,
+                    "important": important_tokens,
+                    "optional": post_prune_len,
+                }
 
                 self.dirty = True
                 kv_path = None
@@ -174,6 +183,8 @@ class KVCacheIndex:
                     "kv_dtype": str(cpu_kv_cache.dtype),
                     "pruning_len": len(first_layer_pruned),
                     "text_tokens_pruned": text_tokens_pruned,
+                    "ilh_bounds": ilh_bounds,
+                    "task_type": getattr(seq, "task_type", "generic"),
                 }
                 total_token += len(seq.token_ids) - 1
                 total_prune += len(first_layer_pruned)
@@ -218,10 +229,27 @@ class KVCacheIndex:
                 item = self.kv_cache_index.get(seq.text_id)
                 if item is None:
                     continue
+                precision_tier = getattr(seq, "precision_tier", "balanced")
+                if precision_tier == "fast":
+                    level_name = "core"
+                elif precision_tier == "high":
+                    level_name = "optional"
+                else:
+                    level_name = "important"
+
+                load_token_limit = seq.text_token_len
+                bounds = item.get("ilh_bounds") if isinstance(item, dict) else None
+                if isinstance(bounds, dict):
+                    level_limit = bounds.get(level_name)
+                    if isinstance(level_limit, int):
+                        load_token_limit = min(load_token_limit, level_limit)
+
                 # Support legacy tensor or new dict format
                 cpu_kv_cache = item.get("kv") if not self.force_gds else None
                 if cpu_kv_cache is None and "gds_cache" in item:
-                    cpu_kv_cache = item.get("gds_cache")
+                    cached_tokens = item.get("gds_cache_tokens")
+                    if not isinstance(cached_tokens, int) or cached_tokens >= load_token_limit:
+                        cpu_kv_cache = item.get("gds_cache")
                 kv_path = item.get("kv_path")
                 # Prefer GPUDirect when enabled and metadata exists
                 if self.use_gds and kv_path is not None:
@@ -230,18 +258,31 @@ class KVCacheIndex:
                         item.get("kv_shape"),
                         item.get("kv_dtype"),
                         stream,
+                        load_tokens=load_token_limit,
                     )
                     if gpu_cache is not None:
                         item["gds_cache"] = gpu_cache
+                        item["gds_cache_tokens"] = int(gpu_cache.shape[2])
                         cpu_kv_cache = gpu_cache
 
                 if cpu_kv_cache is None:
                     continue
+                if (
+                    isinstance(cpu_kv_cache, torch.Tensor)
+                    and cpu_kv_cache.ndim >= 3
+                    and cpu_kv_cache.shape[2] > load_token_limit
+                ):
+                    cpu_kv_cache = cpu_kv_cache[:, :, :load_token_limit]
 
                 # Only copy tokens that aren't already cached (full blocks only)
                 start_token = seq.num_cached_tokens
                 start_block_idx = start_token // block_size
                 token_offset = start_token
+                target_token_len = min(
+                    seq.text_token_len,
+                    load_token_limit,
+                    int(cpu_kv_cache.shape[2]),  # type: ignore[index]
+                )
                 # gpu_kv_cache[2, num_layers, num_blocks, block_size, num_kv_heads, head_dim]
                 # cpu_kv_cache[2, num_layers, seq_len, num_kv_heads, head_dim]
                 # Skip fully cached leading blocks
@@ -249,7 +290,7 @@ class KVCacheIndex:
                     if cancel_event.is_set():
                         break
 
-                    remaining = seq.text_token_len - token_offset
+                    remaining = target_token_len - token_offset
                     if remaining <= 0:
                         break
 
@@ -294,6 +335,7 @@ class KVCacheIndex:
                 to_save = dict(item)
                 # Drop GPU-resident cache before persisting
                 to_save.pop("gds_cache", None)
+                to_save.pop("gds_cache_tokens", None)
                 if self.use_gds and "kv_path" in to_save:
                     # avoid serializing full tensor when GPUDirect file exists
                     to_save.pop("kv", None)
@@ -319,6 +361,7 @@ class KVCacheIndex:
         kv_shape: Optional[tuple],
         kv_dtype: Optional[str],
         stream: torch.cuda.Stream,
+        load_tokens: Optional[int] = None,
     ):
         """
         Load KV tensor directly into GPU memory via GPUDirect Storage.
@@ -329,6 +372,19 @@ class KVCacheIndex:
 
         if isinstance(kv_shape, list):
             kv_shape = tuple(kv_shape)
+        if load_tokens is not None:
+            load_tokens = max(0, int(load_tokens))
+            if load_tokens == 0:
+                return None
+            if len(kv_shape) < 3:
+                return None
+            load_tokens = min(load_tokens, int(kv_shape[2]))
+            kv_shape = (
+                int(kv_shape[0]),
+                int(kv_shape[1]),
+                load_tokens,
+                *tuple(int(x) for x in kv_shape[3:]),
+            )
 
         dtype = getattr(torch, str(kv_dtype).split(".")[-1], None)
         if dtype is None:

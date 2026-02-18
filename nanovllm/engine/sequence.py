@@ -15,7 +15,16 @@ class Sequence:
     block_size = 256
     counter = count()
 
-    def __init__(self, token_ids: list[int] | tuple[int, list[int]], text_token_len = 0, pruning_len = 0 , sampling_params = SamplingParams()):
+    def __init__(
+        self,
+        token_ids: list[int] | tuple[int, list[int]],
+        text_token_len=0,
+        pruning_len=0,
+        sampling_params=SamplingParams(),
+        task_type: str = "generic",
+        precision_tier: str = "balanced",
+        adaptive_sparsity: list[list[float]] | None = None,
+    ):
         self.seq_id = next(Sequence.counter)
         self.status = SequenceStatus.WAITING
         if isinstance(token_ids, tuple):
@@ -25,7 +34,7 @@ class Sequence:
             self.text_id = None
             self.token_ids = copy(token_ids)
 
-        self.last_token = token_ids[-1]
+        self.last_token = self.token_ids[-1]
         self.num_tokens = len(self.token_ids)
         self.num_prompt_tokens = len(token_ids[1]) if isinstance(token_ids, tuple) else len(token_ids)
         self.num_cached_tokens = 0
@@ -38,6 +47,9 @@ class Sequence:
         # Pruning related fields: list of per-layer local index lists
         self.pruning_indices: list[list[int]] = []
         self.pruning_len = pruning_len
+        self.task_type = task_type
+        self.precision_tier = precision_tier
+        self.adaptive_sparsity = adaptive_sparsity
 
     def __len__(self):
         return len(self.token_ids)

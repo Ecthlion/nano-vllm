@@ -16,6 +16,8 @@ class Context:
     pruning_enabled: bool = False
     # Outer list indexed by layer, inner list stores per-sequence tensors of local indices
     pruned_local_indices: list[list[torch.Tensor]] | None = None
+    # Per-sequence adaptive sparsity tables, each shaped [num_layers, num_kv_heads]
+    adaptive_sparsities: list[torch.Tensor] | None = None
     sparsity = 0.9
 
 _CONTEXT = Context()
@@ -23,9 +25,34 @@ _CONTEXT = Context()
 def get_context():
     return _CONTEXT
 
-def set_context(is_prefill, cu_seqlens_q=None, cu_seqlens_k=None, max_seqlen_q=0, max_seqlen_k=0, slot_mapping=None, context_lens=None, block_tables=None, pruning_enabled: bool = False, pruned_local_indices: list[list[torch.Tensor]] | None = None, sparsity = 0.9):
+def set_context(
+    is_prefill,
+    cu_seqlens_q=None,
+    cu_seqlens_k=None,
+    max_seqlen_q=0,
+    max_seqlen_k=0,
+    slot_mapping=None,
+    context_lens=None,
+    block_tables=None,
+    pruning_enabled: bool = False,
+    pruned_local_indices: list[list[torch.Tensor]] | None = None,
+    adaptive_sparsities: list[torch.Tensor] | None = None,
+    sparsity=0.9,
+):
     global _CONTEXT
-    _CONTEXT = Context(is_prefill, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, context_lens, block_tables, pruning_enabled, pruned_local_indices)
+    _CONTEXT = Context(
+        is_prefill,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k,
+        slot_mapping,
+        context_lens,
+        block_tables,
+        pruning_enabled,
+        pruned_local_indices,
+        adaptive_sparsities,
+    )
     _CONTEXT.sparsity = sparsity
 
 def reset_context():

@@ -182,6 +182,8 @@ class ModelRunner:
         max_seqlen_k = 0
         slot_mapping = []
         block_tables = None
+        _, num_layers, _, _, num_kv_heads, _ = self.kv_cache.shape
+        adaptive_sparsities = []
         for seq in seqs:
             seqlen = len(seq)
             input_ids.extend(seq[seq.num_cached_tokens:])
@@ -192,6 +194,20 @@ class ModelRunner:
             cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
             max_seqlen_q = max(seqlen_q, max_seqlen_q)
             max_seqlen_k = max(seqlen_k, max_seqlen_k)
+            if seq.adaptive_sparsity is not None:
+                sparsity_table = torch.tensor(
+                    seq.adaptive_sparsity,
+                    dtype=torch.float32,
+                    pin_memory=True,
+                ).cuda(non_blocking=True)
+            else:
+                sparsity_table = torch.full(
+                    (num_layers, num_kv_heads),
+                    float(self.sparsity),
+                    dtype=torch.float32,
+                    pin_memory=True,
+                ).cuda(non_blocking=True)
+            adaptive_sparsities.append(sparsity_table)
             if not seq.block_table:    # warmup
                 continue
 
@@ -221,7 +237,19 @@ class ModelRunner:
         cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         # Single context set call including pruning flags (indices discovered inside attention later)
-        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables, pruning_enabled=self.pruning_enabled, sparsity=self.sparsity)
+        set_context(
+            True,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            slot_mapping,
+            None,
+            block_tables,
+            pruning_enabled=self.pruning_enabled,
+            adaptive_sparsities=adaptive_sparsities,
+            sparsity=self.sparsity,
+        )
         return input_ids, positions
 
     def prepare_decode(self, seqs: list[Sequence]):

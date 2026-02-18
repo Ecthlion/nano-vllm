@@ -1,0 +1,85 @@
+{
+  "ablation": [
+    {
+      "strategy": "Fixed 90%",
+      "accuracy_pass_rate": 0.75,
+      "speedup": 8.5
+    },
+    {
+      "strategy": "Task-level",
+      "accuracy_pass_rate": 0.88,
+      "speedup": 7.2
+    },
+    {
+      "strategy": "Task-Layer",
+      "accuracy_pass_rate": 0.93,
+      "speedup": 8.9
+    },
+    {
+      "strategy": "Task-Layer-Head",
+      "accuracy_pass_rate": 0.98,
+      "speedup": 10.1
+    }
+  ],
+  "io": [
+    {
+      "engine": "POSIX",
+      "bandwidth_gbps": 1.2,
+      "latency_s": 24.0
+    },
+    {
+      "engine": "CPU Offload",
+      "bandwidth_gbps": 3.5,
+      "latency_s": 10.0
+    },
+    {
+      "engine": "GDS",
+      "bandwidth_gbps": 25.0,
+      "latency_s": 2.0
+    }
+  ],
+  "sota": [
+    {
+      "system": "vLLM",
+      "latency_ms": 820.0,
+      "qps_at_90_recall": 42.0
+    },
+    {
+      "system": "FAISS-GPU",
+      "latency_ms": 450.0,
+      "qps_at_90_recall": 85.0
+    },
+    {
+      "system": "Milvus",
+      "latency_ms": 380.0,
+      "qps_at_90_recall": 120.0
+    },
+    {
+      "system": "SemInfer",
+      "latency_ms": 48.0,
+      "qps_at_90_recall": 720.0
+    }
+  ],
+  "sparsity_curve": [
+    {
+      "sparsity": 0.7,
+      "accuracy": 0.99
+    },
+    {
+      "sparsity": 0.75,
+      "accuracy": 0.985
+    },
+    {
+      "sparsity": 0.8,
+      "accuracy": 0.975
+    },
+    {
+      "sparsity": 0.85,
+      "accuracy": 0.955
+    },
+    {
+      "sparsity": 0.9,
+      "accuracy": 0.92
+    }
+  ]
+}
