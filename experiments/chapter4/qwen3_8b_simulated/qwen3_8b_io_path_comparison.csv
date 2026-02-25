@@ -1,0 +1,4 @@
+engine,bandwidth_gbps,p50_io_latency_ms,p99_io_latency_ms,cpu_util_pct
+POSIX+Memcpy,3.1,28.2,46.7,56.0
+PinnedMemory+AsyncH2D,11.8,9.4,15.9,24.0
+GDS,24.7,4.1,6.8,4.8

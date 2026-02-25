@@ -1,0 +1,364 @@
+{
+  "config": {
+    "num_layers": 80,
+    "num_heads": 8,
+    "seq_len": 4096,
+    "head_dim": 128,
+    "dtype_bytes": 2,
+    "hbm_bandwidth_gbps": 25.0
+  },
+  "summary": [
+    {
+      "strategy": "Fixed-90",
+      "use_cmaes": false,
+      "use_csr_kv": false,
+      "use_layer_interleaved": false,
+      "avg_sparsity": 0.9,
+      "accuracy_pass_rate": 0.4,
+      "avg_accuracy_proxy": 0.88324,
+      "index_size_mb": 1280.0,
+      "io_latency_ms": 53.687091200000005,
+      "e2e_latency_ms": 73.6870912,
+      "speedup_vs_dense": 2.465656986063795
+    },
+    {
+      "strategy": "Task-Layer-Head",
+      "use_cmaes": false,
+      "use_csr_kv": false,
+      "use_layer_interleaved": false,
+      "avg_sparsity": 0.8286060681835574,
+      "accuracy_pass_rate": 1.0,
+      "avg_accuracy_proxy": 0.9881,
+      "index_size_mb": 1280.0,
+      "io_latency_ms": 53.687091200000005,
+      "e2e_latency_ms": 82.25436301797312,
+      "speedup_vs_dense": 2.232747358107474
+    },
+    {
+      "strategy": "Task-Layer-Head + CMA-ES",
+      "use_cmaes": true,
+      "use_csr_kv": false,
+      "use_layer_interleaved": false,
+      "avg_sparsity": 0.835789965949978,
+      "accuracy_pass_rate": 1.0,
+      "avg_accuracy_proxy": 0.9855327154261772,
+      "index_size_mb": 1280.0,
+      "io_latency_ms": 53.687091200000005,
+      "e2e_latency_ms": 81.39229528600264,
+      "speedup_vs_dense": 2.2538191175102256
+    },
+    {
+      "strategy": "Task-Layer-Head + CMA-ES + CSR-KV",
+      "use_cmaes": true,
+      "use_csr_kv": true,
+      "use_layer_interleaved": false,
+      "avg_sparsity": 0.835789965949978,
+      "accuracy_pass_rate": 1.0,
+      "avg_accuracy_proxy": 0.9855327154261772,
+      "index_size_mb": 210.19037475585938,
+      "io_latency_ms": 8.816023296000001,
+      "e2e_latency_ms": 36.521227382002635,
+      "speedup_vs_dense": 5.454530840225197
+    },
+    {
+      "strategy": "Full SemInfer (CMA-ES + CSR-KV + LIS)",
+      "use_cmaes": true,
+      "use_csr_kv": true,
+      "use_layer_interleaved": true,
+      "avg_sparsity": 0.835789965949978,
+      "accuracy_pass_rate": 1.0,
+      "avg_accuracy_proxy": 0.9855327154261772,
+      "index_size_mb": 210.19037475585938,
+      "io_latency_ms": 8.816023296000001,
+      "e2e_latency_ms": 30.06677567746708,
+      "speedup_vs_dense": 7.326964381406434
+    }
+  ],
+  "per_task": {
+    "Fixed-90": [
+      {
+        "task": "sentiment_classification",
+        "avg_sparsity": 0.9,
+        "loss": 0.0,
+        "accuracy_proxy": 1.0,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 73.6870912,
+        "speedup_vs_dense": 2.465656986063795
+      },
+      {
+        "task": "summarization",
+        "avg_sparsity": 0.9,
+        "loss": 0.017000000000000015,
+        "accuracy_proxy": 0.9762,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 73.6870912,
+        "speedup_vs_dense": 2.465656986063795
+      },
+      {
+        "task": "scientific_qa",
+        "avg_sparsity": 0.9,
+        "loss": 0.051000000000000045,
+        "accuracy_proxy": 0.9286,
+        "pass": 0.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 73.6870912,
+        "speedup_vs_dense": 2.465656986063795
+      },
+      {
+        "task": "multi_hop_reasoning",
+        "avg_sparsity": 0.9,
+        "loss": 0.112,
+        "accuracy_proxy": 0.8432,
+        "pass": 0.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 73.6870912,
+        "speedup_vs_dense": 2.465656986063795
+      },
+      {
+        "task": "code_generation",
+        "avg_sparsity": 0.9,
+        "loss": 0.23700000000000002,
+        "accuracy_proxy": 0.6682,
+        "pass": 0.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 73.6870912,
+        "speedup_vs_dense": 2.465656986063795
+      }
+    ],
+    "Task-Layer-Head": [
+      {
+        "task": "sentiment_classification",
+        "avg_sparsity": 0.8965151704588935,
+        "loss": 0.002962105109940538,
+        "accuracy_proxy": 0.9958530528460833,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 74.10527074493278,
+        "speedup_vs_dense": 2.451743167167681
+      },
+      {
+        "task": "summarization",
+        "avg_sparsity": 0.8965151704588935,
+        "loss": 0.014037894890059476,
+        "accuracy_proxy": 0.9803469471539167,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 74.10527074493278,
+        "speedup_vs_dense": 2.451743167167681
+      },
+      {
+        "task": "scientific_qa",
+        "avg_sparsity": 0.85,
+        "loss": 0.008500000000000008,
+        "accuracy_proxy": 0.9881,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 79.68709120000001,
+        "speedup_vs_dense": 2.2800065664838822
+      },
+      {
+        "task": "multi_hop_reasoning",
+        "avg_sparsity": 0.8,
+        "loss": 0.0,
+        "accuracy_proxy": 1.0,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 85.6870912,
+        "speedup_vs_dense": 2.1203554544281227
+      },
+      {
+        "task": "code_generation",
+        "avg_sparsity": 0.7,
+        "loss": 0.017000000000000015,
+        "accuracy_proxy": 0.9762,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 97.68709120000001,
+        "speedup_vs_dense": 1.8598884352900045
+      }
+    ],
+    "Task-Layer-Head + CMA-ES": [
+      {
+        "task": "sentiment_classification",
+        "avg_sparsity": 0.8969707320013974,
+        "loss": 0.0025748777988122027,
+        "accuracy_proxy": 0.9963951710816629,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 74.05060335983231,
+        "speedup_vs_dense": 2.4535531509059054
+      },
+      {
+        "task": "summarization",
+        "avg_sparsity": 0.8969707320013974,
+        "loss": 0.014425122201187811,
+        "accuracy_proxy": 0.9798048289183371,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 74.05060335983231,
+        "speedup_vs_dense": 2.4535531509059054
+      },
+      {
+        "task": "scientific_qa",
+        "avg_sparsity": 0.8604295005452538,
+        "loss": 0.017365075463465756,
+        "accuracy_proxy": 0.9756888943511479,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 78.43555113456955,
+        "speedup_vs_dense": 2.3163870027289644
+      },
+      {
+        "task": "multi_hop_reasoning",
+        "avg_sparsity": 0.8118963051060067,
+        "loss": 0.011083974095932609,
+        "accuracy_proxy": 0.9844824362656943,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 84.25953458727919,
+        "speedup_vs_dense": 2.156279311177558
+      },
+      {
+        "task": "code_generation",
+        "avg_sparsity": 0.7126825600958349,
+        "loss": 0.0062198239185403455,
+        "accuracy_proxy": 0.9912922465140435,
+        "pass": 1.0,
+        "index_size_mb": 1280.0,
+        "io_latency_ms": 53.687091200000005,
+        "e2e_latency_ms": 96.16518398849982,
+        "speedup_vs_dense": 1.889322971832795
+      }
+    ],
+    "Task-Layer-Head + CMA-ES + CSR-KV": [
+      {
+        "task": "sentiment_classification",
+        "avg_sparsity": 0.8969707320013974,
+        "loss": 0.0025748777988122027,
+        "accuracy_proxy": 0.9963951710816629,
+        "pass": 1.0,
+        "index_size_mb": 131.8769187927246,
+        "io_latency_ms": 5.531318880000001,
+        "e2e_latency_ms": 25.894831039832308,
+        "speedup_vs_dense": 7.0163458846486675
+      },
+      {
+        "task": "summarization",
+        "avg_sparsity": 0.8969707320013974,
+        "loss": 0.014425122201187811,
+        "accuracy_proxy": 0.9798048289183371,
+        "pass": 1.0,
+        "index_size_mb": 131.8769187927246,
+        "io_latency_ms": 5.531318880000001,
+        "e2e_latency_ms": 25.894831039832308,
+        "speedup_vs_dense": 7.0163458846486675
+      },
+      {
+        "task": "scientific_qa",
+        "avg_sparsity": 0.8604295005452538,
+        "loss": 0.017365075463465756,
+        "accuracy_proxy": 0.9756888943511479,
+        "pass": 1.0,
+        "index_size_mb": 178.75249099731445,
+        "io_latency_ms": 7.49742288,
+        "e2e_latency_ms": 32.24588281456955,
+        "speedup_vs_dense": 5.634427571569197
+      },
+      {
+        "task": "multi_hop_reasoning",
+        "avg_sparsity": 0.8118963051060067,
+        "loss": 0.011083974095932609,
+        "accuracy_proxy": 0.9844824362656943,
+        "pass": 1.0,
+        "index_size_mb": 240.62824630737305,
+        "io_latency_ms": 10.09268016,
+        "e2e_latency_ms": 40.665123547279194,
+        "speedup_vs_dense": 4.4678848937655875
+      },
+      {
+        "task": "code_generation",
+        "avg_sparsity": 0.7126825600958349,
+        "loss": 0.0062198239185403455,
+        "accuracy_proxy": 0.9912922465140435,
+        "pass": 1.0,
+        "index_size_mb": 367.81729888916016,
+        "io_latency_ms": 15.427375679999999,
+        "e2e_latency_ms": 57.90546846849981,
+        "speedup_vs_dense": 3.137649966493865
+      }
+    ],
+    "Full SemInfer (CMA-ES + CSR-KV + LIS)": [
+      {
+        "task": "sentiment_classification",
+        "avg_sparsity": 0.8969707320013974,
+        "loss": 0.0025748777988122027,
+        "accuracy_proxy": 0.9963951710816629,
+        "pass": 1.0,
+        "index_size_mb": 131.8769187927246,
+        "io_latency_ms": 5.531318880000001,
+        "e2e_latency_ms": 18.734431187045725,
+        "speedup_vs_dense": 9.698030828159382
+      },
+      {
+        "task": "summarization",
+        "avg_sparsity": 0.8969707320013974,
+        "loss": 0.014425122201187811,
+        "accuracy_proxy": 0.9798048289183371,
+        "pass": 1.0,
+        "index_size_mb": 131.8769187927246,
+        "io_latency_ms": 5.531318880000001,
+        "e2e_latency_ms": 18.734431187045725,
+        "speedup_vs_dense": 9.698030828159382
+      },
+      {
+        "task": "scientific_qa",
+        "avg_sparsity": 0.8604295005452538,
+        "loss": 0.017365075463465756,
+        "accuracy_proxy": 0.9756888943511479,
+        "pass": 1.0,
+        "index_size_mb": 178.75249099731445,
+        "io_latency_ms": 7.49742288,
+        "e2e_latency_ms": 22.768583139803983,
+        "speedup_vs_dense": 7.979727595889577
+      },
+      {
+        "task": "multi_hop_reasoning",
+        "avg_sparsity": 0.8118963051060067,
+        "loss": 0.011083974095932609,
+        "accuracy_proxy": 0.9844824362656943,
+        "pass": 1.0,
+        "index_size_mb": 240.62824630737305,
+        "io_latency_ms": 10.09268016,
+        "e2e_latency_ms": 28.880106317423223,
+        "speedup_vs_dense": 6.291081106248875
+      },
+      {
+        "task": "code_generation",
+        "avg_sparsity": 0.7126825600958349,
+        "loss": 0.0062198239185403455,
+        "accuracy_proxy": 0.9912922465140435,
+        "pass": 1.0,
+        "index_size_mb": 367.81729888916016,
+        "io_latency_ms": 15.427375679999999,
+        "e2e_latency_ms": 61.216326556016746,
+        "speedup_vs_dense": 2.967951548574954
+      }
+    ]
+  }
+}

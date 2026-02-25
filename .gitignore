@@ -198,4 +198,6 @@ trace_*
 *.jsonl
 *.txt
 *.csv
+!experiments/chapter4/*.csv
+!experiments/chapter4/qwen3_8b_simulated/*.csv
 node_modules/

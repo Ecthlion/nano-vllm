@@ -137,6 +137,7 @@ class LLMEngine:
             num_heads=num_kv_heads,
             seq_len=prompt_len,
             seq_len_p95=sampling_params.seq_len_p95,
+            use_cmaes=sampling_params.use_cmaes,
         )
 
         seq = Sequence(

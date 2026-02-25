@@ -1,0 +1,4 @@
+scheduler,compute_io_overlap_pct,e2e_latency_ms,relative_speedup
+Sequential,0.0,71.4,1.0
+DualStreamPipeline,71.2,49.7,1.44
+LayerInterleavedScheduler,92.0,41.6,1.72

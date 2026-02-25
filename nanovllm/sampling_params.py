@@ -10,6 +10,7 @@ class SamplingParams:
     task_type: str | None = None
     precision_tier: str = "balanced"
     seq_len_p95: int = 2048
+    use_cmaes: bool = False
 
     def __post_init__(self):
         # assert self.temperature > 1e-10, "greedy sampling is not permitted"

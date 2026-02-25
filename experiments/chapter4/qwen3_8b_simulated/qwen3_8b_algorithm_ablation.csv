@@ -1,0 +1,7 @@
+strategy,avg_sparsity,accuracy_pass_rate,avg_accuracy,index_size_gb,e2e_latency_ms,speedup_vs_dense
+Fixed-90,0.9,0.78,0.903,218.0,68.4,8.2
+Task-level,0.84,0.9,0.931,272.4,73.1,7.7
+Task-Layer,0.85,0.94,0.944,256.1,61.8,9.1
+Task-Layer-Head,0.83,0.97,0.952,240.5,55.2,10.2
+Task-Layer-Head + CMA-ES,0.84,0.985,0.958,236.8,51.7,10.9
+Full SemInfer (CMA-ES + CSR-KV + GDS + LIS),0.84,0.985,0.958,71.9,41.6,13.5

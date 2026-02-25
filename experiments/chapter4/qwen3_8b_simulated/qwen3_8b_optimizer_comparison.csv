@@ -1,0 +1,5 @@
+method,num_evaluations,best_speedup,accuracy_pass_rate,wall_clock_hours,convergence_generation
+GridSearch,200000,10.6,0.964,72.0,999
+RandomSearch,5000,10.1,0.921,6.4,212
+BayesianOpt,5000,10.4,0.949,6.9,141
+CMA-ES,3000,10.9,0.985,4.2,58

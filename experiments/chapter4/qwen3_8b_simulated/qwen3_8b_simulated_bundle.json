@@ -1,0 +1,17 @@
+{
+  "model": "Qwen3-8B",
+  "generated_files": [
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_algorithm_ablation.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_task_optimal_sparsity.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_sparsity_sensitivity.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_optimizer_comparison.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_io_path_comparison.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_scheduler_comparison.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_sota_comparison.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_latency_breakdown.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_batch_scaling.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_concurrency_stress.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_dataset_scale_stress.csv",
+    "/Users/zhangyuyun/projects/py_projects/nano-vllm/experiments/chapter4/qwen3_8b_simulated/qwen3_8b_semantic_dataframe_queries.csv"
+  ]
+}

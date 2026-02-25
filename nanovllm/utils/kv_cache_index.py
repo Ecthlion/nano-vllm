@@ -5,6 +5,17 @@ from typing import Optional
 import torch
 
 from nanovllm.engine.sequence import Sequence
+from nanovllm.utils.csr_kv import (
+    build_csr_kv,
+    csr_kv_from_record,
+    csr_kv_to_dense,
+    csr_kv_to_record,
+    pin_csr_kv,
+)
+from nanovllm.utils.seminfer_algorithms import (
+    build_layer_interleaved_plan,
+    ilh_bounds,
+)
 
 try:
     import kvikio  # type: ignore
@@ -52,10 +63,18 @@ class KVCacheIndex:
 
             # pin memory when init
             for _, item in list(self.kv_cache_index.items()):
+                csr = csr_kv_from_record(item)
+                if csr is not None:
+                    csr = pin_csr_kv(csr)
+                    item.update(csr_kv_to_record(csr))
+
                 kv = item.get("kv")
                 if isinstance(kv, torch.Tensor):
                     if not kv.is_pinned():
                         item["kv"] = kv.pin_memory()
+                elif csr is not None:
+                    # Backward/forward compatibility: allow loading from CSR-only records.
+                    item["kv"] = csr_kv_to_dense(csr)
                 # legacy files may not include kv shape/dtype metadata
                 if "kv" in item:
                     item.setdefault("kv_shape", tuple(item["kv"].shape))  # type: ignore
@@ -163,28 +182,31 @@ class KVCacheIndex:
                     if i not in first_layer_pruned_set
                 ]
                 text_tokens_pruned = [seq.token_ids[i] for i in kept_local_indices]
-                core_tokens = max(1, int(post_prune_len * 0.70))
-                important_tokens = max(core_tokens, int(post_prune_len * 0.85))
-                important_tokens = min(important_tokens, post_prune_len)
-                ilh_bounds = {
-                    "core": core_tokens,
-                    "important": important_tokens,
-                    "optional": post_prune_len,
-                }
+                bounds = ilh_bounds(post_prune_len)
+                csr = build_csr_kv(cpu_kv_cache, kept_local_indices)
+                csr = pin_csr_kv(csr)
 
                 self.dirty = True
                 kv_path = None
                 if self.use_gds:
                     kv_path = self._dump_kv_to_gds(seq.text_id, cpu_kv_cache)
+                seq_sparse = getattr(seq, "adaptive_sparsity", None)
+                if isinstance(seq_sparse, list) and seq_sparse:
+                    flat = [float(v) for row in seq_sparse for v in row]
+                    task_sparsity = float(sum(flat) / max(1, len(flat)))
+                else:
+                    task_sparsity = 0.9
                 self.kv_cache_index[seq.text_id] = {
                     "kv": cpu_kv_cache,
+                    **csr_kv_to_record(csr),
                     "kv_path": kv_path,
                     "kv_shape": tuple(cpu_kv_cache.shape),
                     "kv_dtype": str(cpu_kv_cache.dtype),
                     "pruning_len": len(first_layer_pruned),
                     "text_tokens_pruned": text_tokens_pruned,
-                    "ilh_bounds": ilh_bounds,
+                    "ilh_bounds": bounds,
                     "task_type": getattr(seq, "task_type", "generic"),
+                    "task_sparsity": task_sparsity,
                 }
                 total_token += len(seq.token_ids) - 1
                 total_prune += len(first_layer_pruned)
@@ -246,6 +268,17 @@ class KVCacheIndex:
 
                 # Support legacy tensor or new dict format
                 cpu_kv_cache = item.get("kv") if not self.force_gds else None
+                if cpu_kv_cache is None and not self.force_gds:
+                    csr = csr_kv_from_record(item)
+                    if csr is not None:
+                        cpu_kv_cache = csr_kv_to_dense(csr)
+                        if (
+                            isinstance(cpu_kv_cache, torch.Tensor)
+                            and cpu_kv_cache.device.type == "cpu"
+                            and not cpu_kv_cache.is_pinned()
+                        ):
+                            cpu_kv_cache = cpu_kv_cache.pin_memory()
+                        item["kv"] = cpu_kv_cache
                 if cpu_kv_cache is None and "gds_cache" in item:
                     cached_tokens = item.get("gds_cache_tokens")
                     if not isinstance(cached_tokens, int) or cached_tokens >= load_token_limit:
@@ -283,6 +316,27 @@ class KVCacheIndex:
                     load_token_limit,
                     int(cpu_kv_cache.shape[2]),  # type: ignore[index]
                 )
+                # Layer-interleaved scheduling order (critical-path greedy).
+                layer_compute_costs: list[float] = []
+                seq_sparsity = getattr(seq, "adaptive_sparsity", None)
+                for layer_idx in range(num_layers):
+                    if (
+                        isinstance(seq_sparsity, list)
+                        and layer_idx < len(seq_sparsity)
+                        and len(seq_sparsity[layer_idx]) > 0
+                    ):
+                        layer_mean = float(sum(seq_sparsity[layer_idx]) / len(seq_sparsity[layer_idx]))
+                    else:
+                        layer_mean = float(item.get("task_sparsity", 0.9))
+                    layer_compute_costs.append(
+                        max(1e-3, (1.0 - layer_mean) * max(1.0, float(target_token_len)))
+                    )
+                layer_plan = build_layer_interleaved_plan(
+                    load_times=[float(target_token_len)] * num_layers,
+                    compute_times=layer_compute_costs,
+                )
+                layer_order = layer_plan.order if layer_plan.order else list(range(num_layers))
+
                 # gpu_kv_cache[2, num_layers, num_blocks, block_size, num_kv_heads, head_dim]
                 # cpu_kv_cache[2, num_layers, seq_len, num_kv_heads, head_dim]
                 # Skip fully cached leading blocks
@@ -297,7 +351,7 @@ class KVCacheIndex:
                     block_tokens = remaining if remaining < block_size else block_size
 
                     for kv_idx in range(2):
-                        for layer_idx in range(num_layers):
+                        for layer_idx in layer_order:
                             dst = self.gpu_kv_cache[
                                 kv_idx, layer_idx, block_id, :block_tokens
                             ]
@@ -339,6 +393,8 @@ class KVCacheIndex:
                 if self.use_gds and "kv_path" in to_save:
                     # avoid serializing full tensor when GPUDirect file exists
                     to_save.pop("kv", None)
+                    to_save.pop("key", None)
+                    to_save.pop("value", None)
                 serializable_index[text_id] = to_save
 
             torch.save(serializable_index, path)

@@ -1,0 +1,6 @@
+stage,latency_ms,ratio_pct
+query_parse,2.6,6.3
+task_lookup_and_dispatch,1.8,4.3
+gds_io_transfer,14.9,35.8
+attention_compute,18.2,43.8
+result_assembly,4.1,9.8

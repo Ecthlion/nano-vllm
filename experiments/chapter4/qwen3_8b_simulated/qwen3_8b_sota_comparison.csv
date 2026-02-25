@@ -1,0 +1,6 @@
+system,e2e_latency_ms,throughput_req_s,accuracy,index_size_gb
+vLLM-Dense,562.0,42.0,1.0,0.0
+H2O,154.0,139.0,0.91,245.0
+SnapKV,128.0,165.0,0.892,230.0
+PyramidKV,101.0,198.0,0.931,176.0
+SemInfer-Qwen3-8B,41.6,415.0,0.958,71.9

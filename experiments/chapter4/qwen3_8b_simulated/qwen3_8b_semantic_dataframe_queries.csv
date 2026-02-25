@@ -1,0 +1,4 @@
+query_type,example,precision,recall,f1,latency_ms
+nl_filter_only,find negative reviews mentioning pacing,0.93,0.91,0.92,39.4
+structured_filter_only,rating >= 8 AND year >= 2020,0.99,0.99,0.99,8.3
+hybrid_filter,genre='Sci-Fi' AND contains optimism about future,0.94,0.9,0.92,42.7

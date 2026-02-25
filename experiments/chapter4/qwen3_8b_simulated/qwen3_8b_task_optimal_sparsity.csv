@@ -1,0 +1,6 @@
+task,optimal_sparsity,accuracy_drop_pct,best_strategy
+sentiment_classification,0.91,0.9,Task-Layer-Head + CMA-ES
+long_summarization,0.88,2.0,Task-Layer-Head + CMA-ES
+scientific_qa,0.85,2.8,Task-Layer-Head + CMA-ES
+multi_hop_reasoning,0.81,3.9,Task-Layer-Head + CMA-ES
+code_generation,0.74,4.4,Task-Layer-Head + CMA-ES
