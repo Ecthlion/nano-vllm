@@ -17,7 +17,9 @@ from nanovllm.sampling_params import SamplingParams
 class BackendAPI:
     def __init__(self) -> None:
         print("init backend")
-        path = os.path.expanduser("/data/zwt/model/models/Qwen/Qwen3-8B/")
+        path = os.path.expanduser(
+            os.environ.get("NANOVLLM_MODEL_PATH", "/data/zwt/model/models/Qwen/Qwen3-8B/")
+        )
         self.llm = LLM(path, enforce_eager=False, tensor_parallel_size=1)
         self.base_sampling = SamplingParams(temperature=0, max_tokens=1)
         self.data: pd.DataFrame | None = None
@@ -55,6 +57,8 @@ class BackendAPI:
         field: str | None = None,
         limit: int | None = None,
         no_pruning=False,
+        task_type: str = "generic",
+        precision_tier: str = "high",
         # virtual_intent: str = "The key entities and summary of above text are:\n",
         df=None,
     ) -> dict[str, Any]:
@@ -100,8 +104,8 @@ class BackendAPI:
             max_tokens=self.base_sampling.max_tokens,
         )
         sp.task_str_len = 1
-        sp.task_type = "generic"
-        sp.precision_tier = "high"
+        sp.task_type = task_type
+        sp.precision_tier = precision_tier
 
         self.llm.generate(
             samples,
@@ -188,9 +192,6 @@ class BackendAPI:
     def query(
         self, query: str, use_index: bool, limit: int | None = None
     ) -> dict[str, Any]:
-        query = """
-        LLM("Given the above film review, check these two conditions:\n1. The overall sentiment of review is negative.\n2. The content discusses acting performance.\nIf both are true, return "yes". Otherwise "no". Respond ONLY with "yes" or "no", in all lower case.\n") == "yes"
-        """
         self.llm.scheduler.block_manager.reset()
         self._ensure_data_loaded()
         df = self.data.copy()  # type: ignore[assignment]
@@ -202,7 +203,6 @@ class BackendAPI:
         # Example: sentiment == "positive" and LLM('Is this good?') == 'yes'
         try:
             df_filter, base_prompt, target_val = self._parse_query(query)
-            df_filter = f"review.str.len() > 2500"
         except ValueError:
             return {
                 "results": [],
