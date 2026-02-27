@@ -1,0 +1,3 @@
+setting,latency_ms,throughput_qps,speedup
+vllm_baseline,932.0,38.5,1.0
+offline_precompute_plus_online_retrieval,214.3,168.9,4.35

@@ -1,0 +1,3 @@
+system,latency_ms,throughput_qps,speedup_vs_vllm
+vLLM,932.0,38.5,1.0
+SemInfer_full_stack,62.9,552.8,14.82

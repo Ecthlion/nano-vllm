@@ -85,10 +85,11 @@ class Attention(nn.Module):
                 lens_k = (cuk[1:] - cuk[:-1]).to(torch.long)  # [B]
                 seq_ids = torch.repeat_interleave(torch.arange(B, device=k.device), lens_k)
 
-                # Gather last q per token's sequence and compute similarity
+                # Gather last q per token's sequence and compute per-head similarity
                 q_last = q_gqa.index_select(0, last_q_idx)  # [B, num_kv_heads, head_dim]
                 q_last_per_token = q_last.index_select(0, seq_ids)  # [N, num_kv_heads, head_dim]
-                logits = (k * q_last_per_token).sum(dim=-1).mean(dim=-1) * self.scale
+                per_head_scores = (k * q_last_per_token).sum(dim=-1) * self.scale
+                logits = per_head_scores.mean(dim=-1)
                 # attn_mean = torch.zeros(logits.size(0), device=logits.device, dtype=logits.dtype)
                 # for i in range(B):
                 #     s = int(cuk[i].item()); e = int(cuk[i+1].item())
@@ -148,7 +149,6 @@ class Attention(nn.Module):
 
                 scores = base_scores
 
-                alpha = context.sparsity
                 pruned_locals: list[torch.Tensor] = []
                 num_pruned = 0
                 # Per-sequence topk on filtered scores
@@ -158,13 +158,38 @@ class Attention(nn.Module):
                     if seqlen_i <= 1:
                         pruned_locals.append(torch.empty(0, dtype=torch.int64, device=k.device))
                         continue
-                    seq_scores = scores[s:e - 1]  # remove anchor token
-                    k_prune = max(int(alpha * seqlen_i), 0)
+                    seq_scores = scores[s:e - 1]  # [L-1]
+                    seq_head_scores = per_head_scores[s:e - 1]  # [L-1, num_kv_heads]
+
+                    layer_head_sparsity = torch.full(
+                        (self.num_kv_heads,),
+                        float(context.sparsity),
+                        dtype=seq_head_scores.dtype,
+                        device=seq_head_scores.device,
+                    )
+                    if (
+                        context.adaptive_sparsities is not None
+                        and i < len(context.adaptive_sparsities)
+                    ):
+                        seq_sparse = context.adaptive_sparsities[i]
+                        if seq_sparse.dim() == 2 and self.layer_id < seq_sparse.size(0):
+                            layer_head_sparsity = seq_sparse[self.layer_id].to(
+                                dtype=seq_head_scores.dtype,
+                                device=seq_head_scores.device,
+                            )
+                    layer_head_sparsity = layer_head_sparsity.clamp_(0.50, 0.97)
+
+                    keep_weight = (1.0 - layer_head_sparsity).unsqueeze(0)
+                    weighted_scores = (seq_head_scores * keep_weight).mean(dim=-1)
+                    weighted_scores = 0.5 * weighted_scores + 0.5 * seq_scores
+
+                    prune_ratio = float(layer_head_sparsity.mean().item())
+                    k_prune = max(int(prune_ratio * seqlen_i), 0)
                     k_prune = min(k_prune, seq_scores.numel() - 1)
                     if k_prune <= 0:
                         pruned_locals.append(torch.empty(0, dtype=torch.int64, device=k.device))
                         continue
-                    _, idx = torch.topk(seq_scores, k=k_prune, largest=False, sorted=False)
+                    _, idx = torch.topk(weighted_scores, k=k_prune, largest=False, sorted=False)
                     num_pruned += len(idx)
                     # store LOCAL indices within the sequence
                     pruned_locals.append(idx)
@@ -176,8 +201,7 @@ class Attention(nn.Module):
                     context.pruned_local_indices = []
                 while len(context.pruned_local_indices) <= self.layer_id:
                     context.pruned_local_indices.append([])
-                for i in range(36):
-                    context.pruned_local_indices[i] = pruned_locals
+                context.pruned_local_indices[self.layer_id] = pruned_locals
 
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache

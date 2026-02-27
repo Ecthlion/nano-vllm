@@ -100,6 +100,8 @@ class BackendAPI:
             max_tokens=self.base_sampling.max_tokens,
         )
         sp.task_str_len = 1
+        sp.task_type = "generic"
+        sp.precision_tier = "high"
 
         self.llm.generate(
             samples,
@@ -175,6 +177,11 @@ class BackendAPI:
 
         return df_filter, base_prompt, target_val
 
+    def _infer_task_type_from_prompt(self, prompt: str) -> str:
+        if hasattr(self.llm, "adaptive_sparsity"):
+            return self.llm.adaptive_sparsity.infer_task_type(prompt)  # type: ignore[attr-defined]
+        return "generic"
+
     # ------------------------------------------------------------------
     # Query Execution
     # ------------------------------------------------------------------
@@ -232,6 +239,7 @@ class BackendAPI:
         set_all_seeds(42)
         start_time = time.perf_counter()
         effective_index = bool(use_index and self.index_ready)
+        inferred_task_type = self._infer_task_type_from_prompt(base_prompt)
         tuple_prompts: list[tuple[int, str]] = []
         order: list[Any] = []
 
@@ -250,6 +258,8 @@ class BackendAPI:
             max_tokens=self.base_sampling.max_tokens,
         )
         sp.task_str_len = len(base_prompt) + 1
+        sp.task_type = inferred_task_type
+        sp.precision_tier = "balanced" if effective_index else "high"
 
         outputs = self.llm.generate(
             tuple_prompts,
@@ -261,7 +271,6 @@ class BackendAPI:
         )
 
         inference_time = time.perf_counter() - start_time
-        inference_time = 15.4444
         self.inference_time_90 = inference_time
 
         # 3. Filter by LLM output

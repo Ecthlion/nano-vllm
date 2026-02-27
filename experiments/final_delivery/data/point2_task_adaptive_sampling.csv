@@ -1,0 +1,6 @@
+task_type,static_sparsity,adapted_sparsity,accuracy_loss_static_pct,accuracy_loss_adapted_pct,transfer_gb_static,transfer_gb_adapted
+sentiment_classification,0.88,0.92,0.9,0.5,1.22,0.86
+summarization,0.88,0.9,1.7,1.2,2.33,1.94
+scientific_qa,0.88,0.86,2.9,1.9,3.64,3.02
+multi_hop_reasoning,0.88,0.82,4.0,2.3,4.12,3.56
+code_generation,0.88,0.8,4.6,2.7,3.98,3.41

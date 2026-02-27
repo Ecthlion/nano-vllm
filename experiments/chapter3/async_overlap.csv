@@ -1,0 +1,3 @@
+scheduler,h2d_visible_ms,compute_ms,overlap_ratio,e2e_ms
+sync_transfer_then_compute,53.1,95.3,0.0,148.4
+async_interleaved_pipeline,18.7,96.1,0.67,108.1

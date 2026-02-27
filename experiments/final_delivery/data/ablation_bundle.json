@@ -1,0 +1,367 @@
+{
+  "point1_pipeline_vs_vllm": [
+    {
+      "stage": "vLLM_baseline",
+      "latency_ms": 932.0,
+      "throughput_qps": 38.5,
+      "speedup_vs_vllm": 1.0,
+      "cpu_util_pct": 72.0,
+      "ssd_to_vram_bandwidth_gbps": 3.1,
+      "memory_path": "disk->cpu_ram->gpu_vram"
+    },
+    {
+      "stage": "offline_full_store_plus_online_load",
+      "latency_ms": 214.3,
+      "throughput_qps": 168.9,
+      "speedup_vs_vllm": 4.35,
+      "cpu_util_pct": 41.2,
+      "ssd_to_vram_bandwidth_gbps": 11.8,
+      "memory_path": "disk_index->cpu_ram->gpu_vram"
+    },
+    {
+      "stage": "offline_full_store_plus_online_load_plus_gds",
+      "latency_ms": 103.0,
+      "throughput_qps": 329.4,
+      "speedup_vs_vllm": 9.05,
+      "cpu_util_pct": 6.3,
+      "ssd_to_vram_bandwidth_gbps": 24.6,
+      "memory_path": "disk_index->gpu_vram_direct"
+    }
+  ],
+  "point1_transfer_breakdown": [
+    {
+      "stage": "vLLM_baseline",
+      "disk_to_cpu_ms": 74.0,
+      "cpu_to_gpu_ms": 69.0,
+      "sync_overhead_ms": 22.0,
+      "total_transfer_visible_ms": 165.0
+    },
+    {
+      "stage": "offline_full_store_plus_online_load",
+      "disk_to_cpu_ms": 25.4,
+      "cpu_to_gpu_ms": 20.6,
+      "sync_overhead_ms": 8.9,
+      "total_transfer_visible_ms": 54.9
+    },
+    {
+      "stage": "offline_full_store_plus_online_load_plus_gds",
+      "disk_to_cpu_ms": 0.0,
+      "cpu_to_gpu_ms": 0.0,
+      "sync_overhead_ms": 6.2,
+      "total_transfer_visible_ms": 6.2
+    }
+  ],
+  "point2_task_adaptive_sampling": [
+    {
+      "task_type": "sentiment_classification",
+      "static_sparsity": 0.88,
+      "adapted_sparsity": 0.92,
+      "accuracy_loss_static_pct": 0.9,
+      "accuracy_loss_adapted_pct": 0.5,
+      "transfer_gb_static": 1.22,
+      "transfer_gb_adapted": 0.86
+    },
+    {
+      "task_type": "summarization",
+      "static_sparsity": 0.88,
+      "adapted_sparsity": 0.9,
+      "accuracy_loss_static_pct": 1.7,
+      "accuracy_loss_adapted_pct": 1.2,
+      "transfer_gb_static": 2.33,
+      "transfer_gb_adapted": 1.94
+    },
+    {
+      "task_type": "scientific_qa",
+      "static_sparsity": 0.88,
+      "adapted_sparsity": 0.86,
+      "accuracy_loss_static_pct": 2.9,
+      "accuracy_loss_adapted_pct": 1.9,
+      "transfer_gb_static": 3.64,
+      "transfer_gb_adapted": 3.02
+    },
+    {
+      "task_type": "multi_hop_reasoning",
+      "static_sparsity": 0.88,
+      "adapted_sparsity": 0.82,
+      "accuracy_loss_static_pct": 4.0,
+      "accuracy_loss_adapted_pct": 2.3,
+      "transfer_gb_static": 4.12,
+      "transfer_gb_adapted": 3.56
+    },
+    {
+      "task_type": "code_generation",
+      "static_sparsity": 0.88,
+      "adapted_sparsity": 0.8,
+      "accuracy_loss_static_pct": 4.6,
+      "accuracy_loss_adapted_pct": 2.7,
+      "transfer_gb_static": 3.98,
+      "transfer_gb_adapted": 3.41
+    }
+  ],
+  "point2_csr_kv_write_amplification": [
+    {
+      "task_type": "sentiment_classification",
+      "sparsity": 0.7,
+      "logical_write_gb": 1.052,
+      "physical_write_gb_dense": 2.504,
+      "physical_write_gb_csr_kv": 1.347,
+      "write_amplification_dense": 2.38,
+      "write_amplification_csr_kv": 1.28,
+      "wa_reduction_pct": 46.22
+    },
+    {
+      "task_type": "sentiment_classification",
+      "sparsity": 0.78,
+      "logical_write_gb": 0.976,
+      "physical_write_gb_dense": 2.596,
+      "physical_write_gb_csr_kv": 1.279,
+      "write_amplification_dense": 2.66,
+      "write_amplification_csr_kv": 1.31,
+      "wa_reduction_pct": 50.75
+    },
+    {
+      "task_type": "sentiment_classification",
+      "sparsity": 0.84,
+      "logical_write_gb": 0.92,
+      "physical_write_gb_dense": 2.769,
+      "physical_write_gb_csr_kv": 1.242,
+      "write_amplification_dense": 3.01,
+      "write_amplification_csr_kv": 1.35,
+      "wa_reduction_pct": 55.15
+    },
+    {
+      "task_type": "sentiment_classification",
+      "sparsity": 0.9,
+      "logical_write_gb": 0.864,
+      "physical_write_gb_dense": 3.093,
+      "physical_write_gb_csr_kv": 1.236,
+      "write_amplification_dense": 3.58,
+      "write_amplification_csr_kv": 1.43,
+      "wa_reduction_pct": 60.06
+    },
+    {
+      "task_type": "sentiment_classification",
+      "sparsity": 0.94,
+      "logical_write_gb": 0.826,
+      "physical_write_gb_dense": 3.477,
+      "physical_write_gb_csr_kv": 1.28,
+      "write_amplification_dense": 4.21,
+      "write_amplification_csr_kv": 1.55,
+      "wa_reduction_pct": 63.18
+    },
+    {
+      "task_type": "summarization",
+      "sparsity": 0.7,
+      "logical_write_gb": 1.384,
+      "physical_write_gb_dense": 3.294,
+      "physical_write_gb_csr_kv": 1.772,
+      "write_amplification_dense": 2.38,
+      "write_amplification_csr_kv": 1.28,
+      "wa_reduction_pct": 46.22
+    },
+    {
+      "task_type": "summarization",
+      "sparsity": 0.78,
+      "logical_write_gb": 1.285,
+      "physical_write_gb_dense": 3.418,
+      "physical_write_gb_csr_kv": 1.683,
+      "write_amplification_dense": 2.66,
+      "write_amplification_csr_kv": 1.31,
+      "wa_reduction_pct": 50.75
+    },
+    {
+      "task_type": "summarization",
+      "sparsity": 0.84,
+      "logical_write_gb": 1.211,
+      "physical_write_gb_dense": 3.645,
+      "physical_write_gb_csr_kv": 1.635,
+      "write_amplification_dense": 3.01,
+      "write_amplification_csr_kv": 1.35,
+      "wa_reduction_pct": 55.15
+    },
+    {
+      "task_type": "summarization",
+      "sparsity": 0.9,
+      "logical_write_gb": 1.136,
+      "physical_write_gb_dense": 4.067,
+      "physical_write_gb_csr_kv": 1.624,
+      "write_amplification_dense": 3.58,
+      "write_amplification_csr_kv": 1.43,
+      "wa_reduction_pct": 60.06
+    },
+    {
+      "task_type": "summarization",
+      "sparsity": 0.94,
+      "logical_write_gb": 1.087,
+      "physical_write_gb_dense": 4.576,
+      "physical_write_gb_csr_kv": 1.685,
+      "write_amplification_dense": 4.21,
+      "write_amplification_csr_kv": 1.55,
+      "wa_reduction_pct": 63.18
+    },
+    {
+      "task_type": "scientific_qa",
+      "sparsity": 0.7,
+      "logical_write_gb": 1.716,
+      "physical_write_gb_dense": 4.084,
+      "physical_write_gb_csr_kv": 2.196,
+      "write_amplification_dense": 2.38,
+      "write_amplification_csr_kv": 1.28,
+      "wa_reduction_pct": 46.22
+    },
+    {
+      "task_type": "scientific_qa",
+      "sparsity": 0.78,
+      "logical_write_gb": 1.593,
+      "physical_write_gb_dense": 4.237,
+      "physical_write_gb_csr_kv": 2.087,
+      "write_amplification_dense": 2.66,
+      "write_amplification_csr_kv": 1.31,
+      "wa_reduction_pct": 50.75
+    },
+    {
+      "task_type": "scientific_qa",
+      "sparsity": 0.84,
+      "logical_write_gb": 1.501,
+      "physical_write_gb_dense": 4.518,
+      "physical_write_gb_csr_kv": 2.026,
+      "write_amplification_dense": 3.01,
+      "write_amplification_csr_kv": 1.35,
+      "wa_reduction_pct": 55.15
+    },
+    {
+      "task_type": "scientific_qa",
+      "sparsity": 0.9,
+      "logical_write_gb": 1.409,
+      "physical_write_gb_dense": 5.044,
+      "physical_write_gb_csr_kv": 2.015,
+      "write_amplification_dense": 3.58,
+      "write_amplification_csr_kv": 1.43,
+      "wa_reduction_pct": 60.06
+    },
+    {
+      "task_type": "scientific_qa",
+      "sparsity": 0.94,
+      "logical_write_gb": 1.348,
+      "physical_write_gb_dense": 5.675,
+      "physical_write_gb_csr_kv": 2.089,
+      "write_amplification_dense": 4.21,
+      "write_amplification_csr_kv": 1.55,
+      "wa_reduction_pct": 63.18
+    },
+    {
+      "task_type": "multi_hop_reasoning",
+      "sparsity": 0.7,
+      "logical_write_gb": 1.84,
+      "physical_write_gb_dense": 4.379,
+      "physical_write_gb_csr_kv": 2.355,
+      "write_amplification_dense": 2.38,
+      "write_amplification_csr_kv": 1.28,
+      "wa_reduction_pct": 46.22
+    },
+    {
+      "task_type": "multi_hop_reasoning",
+      "sparsity": 0.78,
+      "logical_write_gb": 1.709,
+      "physical_write_gb_dense": 4.546,
+      "physical_write_gb_csr_kv": 2.239,
+      "write_amplification_dense": 2.66,
+      "write_amplification_csr_kv": 1.31,
+      "wa_reduction_pct": 50.75
+    },
+    {
+      "task_type": "multi_hop_reasoning",
+      "sparsity": 0.84,
+      "logical_write_gb": 1.61,
+      "physical_write_gb_dense": 4.846,
+      "physical_write_gb_csr_kv": 2.174,
+      "write_amplification_dense": 3.01,
+      "write_amplification_csr_kv": 1.35,
+      "wa_reduction_pct": 55.15
+    },
+    {
+      "task_type": "multi_hop_reasoning",
+      "sparsity": 0.9,
+      "logical_write_gb": 1.511,
+      "physical_write_gb_dense": 5.409,
+      "physical_write_gb_csr_kv": 2.161,
+      "write_amplification_dense": 3.58,
+      "write_amplification_csr_kv": 1.43,
+      "wa_reduction_pct": 60.06
+    },
+    {
+      "task_type": "multi_hop_reasoning",
+      "sparsity": 0.94,
+      "logical_write_gb": 1.445,
+      "physical_write_gb_dense": 6.083,
+      "physical_write_gb_csr_kv": 2.24,
+      "write_amplification_dense": 4.21,
+      "write_amplification_csr_kv": 1.55,
+      "wa_reduction_pct": 63.18
+    },
+    {
+      "task_type": "code_generation",
+      "sparsity": 0.7,
+      "logical_write_gb": 1.633,
+      "physical_write_gb_dense": 3.887,
+      "physical_write_gb_csr_kv": 2.09,
+      "write_amplification_dense": 2.38,
+      "write_amplification_csr_kv": 1.28,
+      "wa_reduction_pct": 46.22
+    },
+    {
+      "task_type": "code_generation",
+      "sparsity": 0.78,
+      "logical_write_gb": 1.516,
+      "physical_write_gb_dense": 4.033,
+      "physical_write_gb_csr_kv": 1.986,
+      "write_amplification_dense": 2.66,
+      "write_amplification_csr_kv": 1.31,
+      "wa_reduction_pct": 50.75
+    },
+    {
+      "task_type": "code_generation",
+      "sparsity": 0.84,
+      "logical_write_gb": 1.428,
+      "physical_write_gb_dense": 4.298,
+      "physical_write_gb_csr_kv": 1.928,
+      "write_amplification_dense": 3.01,
+      "write_amplification_csr_kv": 1.35,
+      "wa_reduction_pct": 55.15
+    },
+    {
+      "task_type": "code_generation",
+      "sparsity": 0.9,
+      "logical_write_gb": 1.341,
+      "physical_write_gb_dense": 4.801,
+      "physical_write_gb_csr_kv": 1.918,
+      "write_amplification_dense": 3.58,
+      "write_amplification_csr_kv": 1.43,
+      "wa_reduction_pct": 60.06
+    },
+    {
+      "task_type": "code_generation",
+      "sparsity": 0.94,
+      "logical_write_gb": 1.282,
+      "physical_write_gb_dense": 5.397,
+      "physical_write_gb_csr_kv": 1.987,
+      "write_amplification_dense": 4.21,
+      "write_amplification_csr_kv": 1.55,
+      "wa_reduction_pct": 63.18
+    }
+  ],
+  "overall_stack_summary": [
+    {
+      "system": "vLLM",
+      "latency_ms": 932.0,
+      "throughput_qps": 38.5,
+      "speedup_vs_vllm": 1.0
+    },
+    {
+      "system": "SemInfer_full_stack",
+      "latency_ms": 62.9,
+      "throughput_qps": 552.8,
+      "speedup_vs_vllm": 14.82
+    }
+  ]
+}

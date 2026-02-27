@@ -1,0 +1,4 @@
+stage,latency_ms,throughput_qps,speedup_vs_vllm,cpu_util_pct,ssd_to_vram_bandwidth_gbps,memory_path
+vLLM_baseline,932.0,38.5,1.0,72.0,3.1,disk->cpu_ram->gpu_vram
+offline_full_store_plus_online_load,214.3,168.9,4.35,41.2,11.8,disk_index->cpu_ram->gpu_vram
+offline_full_store_plus_online_load_plus_gds,103.0,329.4,9.05,6.3,24.6,disk_index->gpu_vram_direct
